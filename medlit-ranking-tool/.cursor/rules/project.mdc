@@ -1,0 +1,15 @@
+---
+description: MedLit Ranking Tool — project-wide Cursor rules
+globs: ["**/*.py"]
+alwaysApply: true
+---
+
+# Project Rules
+
+- Always use `loguru` for logging; never `print()`.
+- All public functions and classes must have type annotations.
+- Pydantic v2 `BaseModel` is the standard for all data models.
+- Settings must be read from `app.core.config.settings`; never hardcode values.
+- New modules in `app/` must have a corresponding `__init__.py`.
+- Tests live in `tests/` and mirror the `app/` directory structure.
+- Run `ruff check . --fix` and `mypy app/` before considering a task complete.
