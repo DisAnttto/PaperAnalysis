@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     NVIDIA_NIM_API_KEY: str = ""
     NVIDIA_NIM_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
     NVIDIA_NIM_MODEL: str = "moonshotai/kimi-k2.5"
+    # Optional fast/cheap model for mechanical tasks (falls back to main when unset)
+    LLM_LIGHT_MODEL: str = ""
+    LLM_LIGHT_BASE_URL: str = ""
+    LLM_LIGHT_API_KEY: str = ""
 
     # NCBI / PubMed
     NCBI_API_KEY: str = ""
@@ -87,6 +91,19 @@ def get_llm_client_config() -> LLMClientConfig:
         base_url=bu,
         model=s.LLM_MODEL,
         backend="default",
+    )
+
+
+def get_llm_light_config() -> LLMClientConfig:
+    """Light-tier model for mechanical tasks. Falls back to main model when unset."""
+    s = settings
+    if not (s.LLM_LIGHT_MODEL or "").strip():
+        return get_llm_client_config()
+    return LLMClientConfig(
+        api_key=(s.LLM_LIGHT_API_KEY or s.LLM_API_KEY).strip(),
+        base_url=(s.LLM_LIGHT_BASE_URL or s.LLM_BASE_URL or "").strip() or None,
+        model=s.LLM_LIGHT_MODEL.strip(),
+        backend=s.LLM_BACKEND,
     )
 
 
