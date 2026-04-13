@@ -26,9 +26,13 @@ This project is a Python MVP for a medical-device literature intelligence tool.
 - **Style**: Ruff for linting and formatting (line length 88). Run `ruff check . --fix` before committing.
 - **Types**: Strict mypy (`mypy app/`). Avoid `Any` unless absolutely necessary.
 - **Models**: Use Pydantic v2 `BaseModel` for all data structures.
+- **Database**: SQLAlchemy ORM. DB models in `app/models/`, session factory in `app/core/database.py`.
 - **Config**: All settings via `app.core.config.Settings` (pydantic-settings). Never hardcode secrets.
 - **Logging**: Use `loguru` logger, never `print()`.
 - **Tests**: Pytest. New features must include tests. Place tests in `tests/` mirroring the `app/` structure.
+- **Ranking**: Scoring must be deterministic and algorithm-driven. LLMs may enrich signals but never produce the final ranking score alone.
+- **LLM outputs**: Every LLM response must be parsed into a typed Pydantic model. No string manipulation of raw LLM text.
+- **Documentation**: Update `README.md` when adding a major component (new router, service, ingestion source, or ranking algorithm).
 
 ## Module Responsibilities
 
@@ -51,3 +55,6 @@ This project is a Python MVP for a medical-device literature intelligence tool.
 - Add `print()` statements — use `loguru`.
 - Break existing tests without explicit user approval.
 - Add dependencies without updating `requirements.txt`.
+- Produce a final ranking using only LLM output — always use a deterministic scoring function.
+- Parse LLM responses as raw text — always validate against a Pydantic model.
+- Add a major component without updating `README.md`.

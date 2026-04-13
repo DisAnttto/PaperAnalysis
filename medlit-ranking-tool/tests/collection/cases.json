@@ -1,0 +1,298 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "faricimab_namd_39350227",
+      "name": "Faricimab nAMD — PMID 39350227 (gold preset)",
+      "description": "Gold SearchRequest from Grimaldi et al. 2024 (PMID 39350227) abstract; keep in sync with faricimab_namd preset in app/static/app.js and tests/collection/cases.json.",
+      "request": {
+        "query": "intravitreal faricimab treatment-naive nAMD prospective real-world",
+        "target_product": {
+          "target_type": "drug",
+          "product_name": "faricimab",
+          "active_ingredient": "faricimab",
+          "drug_class": "anti_vegf",
+          "route": "intravitreal",
+          "intended_use": "efficacy, safety and durability of intravitreal faricimab in treatment-naive neovascular AMD (real-world prospective cohort)",
+          "indications": [
+            "nAMD",
+            "neovascular age-related macular degeneration",
+            "treatment-naive"
+          ]
+        },
+        "metrics_of_interest": [
+          "BCVA",
+          "CST",
+          "macular volume",
+          "dry macula",
+          "injection interval"
+        ],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["39350227"],
+        "min_composite_by_pmid": {
+          "39350227": 0.8
+        },
+        "max_rank_by_pmid": {
+          "39350227": 5
+        }
+      }
+    },
+    {
+      "id": "faricimab_dme_40943933",
+      "name": "Faricimab DME real-world — PMID 40943933",
+      "description": "Drug-mode gold: faricimab intravitreal DME; BCVA, CFT, macular volume.",
+      "request": {
+        "query": "faricimab diabetic macular edema real-world treatment-naive intravitreal efficacy safety",
+        "keywords": ["40943933"],
+        "target_product": {
+          "target_type": "drug",
+          "product_name": "faricimab",
+          "active_ingredient": "faricimab",
+          "drug_class": "anti_vegf",
+          "route": "intravitreal",
+          "intended_use": "efficacy and safety of faricimab in diabetic macular edema; real-world outcomes in treatment-naive and previously treated eyes",
+          "indications": ["DME", "diabetic macular edema"]
+        },
+        "metrics_of_interest": ["BCVA", "CFT", "macular volume"],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["40943933"],
+        "min_composite_by_pmid": { "40943933": 0.7 },
+        "max_rank_by_pmid": { "40943933": 5 }
+      }
+    },
+    {
+      "id": "aflibercept_dme_te_32783421",
+      "name": "Aflibercept DME treat-and-extend — PMID 32783421",
+      "description": "Drug-mode gold: intravitreal aflibercept DME treat-and-extend 1-year prospective trial.",
+      "request": {
+        "query": "aflibercept diabetic macular edema treat-and-extend prospective clinical trial 1-year intravitreal",
+        "keywords": ["32783421"],
+        "target_product": {
+          "target_type": "drug",
+          "product_name": "Eylea",
+          "active_ingredient": "aflibercept",
+          "drug_class": "anti_vegf",
+          "route": "intravitreal",
+          "intended_use": "treat-and-extend regimen for diabetic macular edema; 1-year outcomes",
+          "indications": ["DME", "diabetic macular edema"]
+        },
+        "metrics_of_interest": ["BCVA", "CST", "injection interval"],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["32783421"],
+        "min_composite_by_pmid": { "32783421": 0.7 },
+        "max_rank_by_pmid": { "32783421": 5 }
+      }
+    },
+    {
+      "id": "aflibercept_dme_te_33559843",
+      "name": "Aflibercept DME treat-and-extend — PMID 33559843",
+      "description": "Drug-mode gold: prospective clinical trial aflibercept DME treat-and-extend (comparator cohort to 32783421).",
+      "request": {
+        "query": "aflibercept treat-and-extend diabetic macular edema prospective clinical trial intravitreal",
+        "keywords": ["33559843"],
+        "target_product": {
+          "target_type": "drug",
+          "product_name": "Eylea",
+          "active_ingredient": "aflibercept",
+          "drug_class": "anti_vegf",
+          "route": "intravitreal",
+          "intended_use": "treat-and-extend therapy with aflibercept for diabetic macular edema",
+          "indications": ["DME", "diabetic macular edema"]
+        },
+        "metrics_of_interest": ["BCVA", "CST", "injection interval"],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["33559843"],
+        "min_composite_by_pmid": { "33559843": 0.7 },
+        "max_rank_by_pmid": { "33559843": 5 }
+      }
+    },
+    {
+      "id": "ozurdex_dme_25574787",
+      "name": "Ozurdex dexamethasone DME — PMID 25574787",
+      "description": "Drug-mode gold: repeated intravitreal dexamethasone implant Ozurdex for DME.",
+      "request": {
+        "query": "Ozurdex dexamethasone implant diabetic macular edema repeated intravitreal",
+        "keywords": ["25574787"],
+        "target_product": {
+          "target_type": "drug",
+          "product_name": "Ozurdex",
+          "active_ingredient": null,
+          "drug_class": "corticosteroid",
+          "route": "intravitreal",
+          "intended_use": "repeated intravitreal dexamethasone implant for diabetic macular edema; BCVA, central macular thickness, retreatment interval",
+          "indications": ["DME", "diabetic macular edema"]
+        },
+        "metrics_of_interest": ["BCVA", "CMT", "injection interval"],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["25574787"],
+        "min_composite_by_pmid": { "25574787": 0.7 },
+        "max_rank_by_pmid": { "25574787": 5 }
+      }
+    },
+    {
+      "id": "brolucizumab_namd_38063874",
+      "name": "Brolucizumab nAMD REBA — PMID 38063874",
+      "description": "Drug-mode gold: real-world brolucizumab nAMD 24-month REBA extension.",
+      "request": {
+        "query": "brolucizumab neovascular AMD real-world 24 month intravitreal BCVA CST outcomes",
+        "keywords": ["38063874"],
+        "target_product": {
+          "target_type": "drug",
+          "product_name": "Beovu",
+          "active_ingredient": "brolucizumab",
+          "drug_class": "anti_vegf",
+          "route": "intravitreal",
+          "intended_use": "real-world brolucizumab in neovascular age-related macular degeneration over 2 years; treatment-naive versus switch patients",
+          "indications": [
+            "namd",
+            "nAMD",
+            "neovascular age-related macular degeneration"
+          ]
+        },
+        "metrics_of_interest": ["BCVA", "CST"],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["38063874"],
+        "min_composite_by_pmid": { "38063874": 0.7 },
+        "max_rank_by_pmid": { "38063874": 5 }
+      }
+    },
+    {
+      "id": "panoptix_iol_37641668",
+      "name": "AcrySof IQ PanOptix IOL — PMID 37641668",
+      "description": "Device-mode gold: bilateral AcrySof IQ PanOptix trifocal IOL prospective study.",
+      "request": {
+        "query": "AcrySof IQ PanOptix trifocal intraocular lens bilateral prospective interventional visual acuity",
+        "keywords": ["37641668"],
+        "target_product": {
+          "target_type": "device",
+          "product_name": "AcrySof IQ PanOptix",
+          "device_category": "intraocular_lens",
+          "manufacturer": "Alcon",
+          "intended_use": "bilateral implantation of trifocal intraocular lens; uncorrected and corrected visual acuities, photic phenomena, posterior capsule opacification, spectacle independence",
+          "indications": ["cataract", "pseudophakia"],
+          "anatomical_site": "lens_capsule",
+          "material_family": "acrylic",
+          "material_subtype": "hydrophobic_acrylic",
+          "key_features": ["trifocal", "AcrySof", "PanOptix", "hydrophobic_acrylic"]
+        },
+        "metrics_of_interest": [
+          "UDVA",
+          "CDVA",
+          "UIVA",
+          "UNVA",
+          "PCO",
+          "spectacle independence"
+        ],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["37641668"],
+        "min_composite_by_pmid": { "37641668": 0.7 },
+        "max_rank_by_pmid": { "37641668": 5 }
+      }
+    },
+    {
+      "id": "clareon_panoptix_39465378",
+      "name": "Clareon PanOptix hydrophobic acrylic IOL — PMID 39465378",
+      "description": "Device-mode gold: Clareon PanOptix CNWTT0 high water-content hydrophobic acrylic trifocal IOL.",
+      "request": {
+        "query": "Clareon PanOptix hydrophobic acrylic trifocal intraocular lens bilateral visual acuity contrast sensitivity",
+        "keywords": ["39465378"],
+        "target_product": {
+          "target_type": "device",
+          "product_name": "Clareon PanOptix",
+          "device_category": "intraocular_lens",
+          "manufacturer": "Alcon",
+          "intended_use": "Clareon PanOptix (CNWTT0) high water-content hydrophobic acrylic trifocal intraocular lens; distance, intermediate, and near visual acuity and contrast sensitivity",
+          "indications": ["trifocal intraocular lens", "cataract surgery"],
+          "anatomical_site": "lens_capsule",
+          "material_family": "acrylic",
+          "material_subtype": "hydrophobic_acrylic",
+          "key_features": ["trifocal", "hydrophobic_acrylic", "Clareon", "PanOptix"]
+        },
+        "metrics_of_interest": ["UDVA", "CDVA", "contrast sensitivity"],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["39465378"],
+        "min_composite_by_pmid": { "39465378": 0.7 },
+        "max_rank_by_pmid": { "39465378": 5 }
+      }
+    },
+    {
+      "id": "ahmed_valve_32184556",
+      "name": "Ahmed Glaucoma Valve S2 FP7 — PMID 32184556",
+      "description": "Device-mode gold: Ahmed glaucoma valve models S2 and FP7 refractory glaucoma randomized trial.",
+      "request": {
+        "query": "Ahmed glaucoma valve refractory glaucoma prospective randomized trial IOP",
+        "keywords": ["32184556"],
+        "target_product": {
+          "target_type": "device",
+          "product_name": "Ahmed Glaucoma Valve",
+          "device_category": "glaucoma_device",
+          "manufacturer": "New World Medical",
+          "intended_use": "Ahmed glaucoma valve models S2 and FP7 for refractory glaucoma; IOP, medications, visual acuity, complications",
+          "indications": ["glaucoma", "refractory glaucoma"],
+          "anatomical_site": "anterior_segment"
+        },
+        "metrics_of_interest": ["IOP", "medications", "BCVA"],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["32184556"],
+        "min_composite_by_pmid": { "32184556": 0.7 },
+        "max_rank_by_pmid": { "32184556": 5 }
+      }
+    },
+    {
+      "id": "xen_stent_31197608",
+      "name": "XEN Gel Stent OAG — PMID 31197608",
+      "description": "Device-mode gold: XEN Gel Stent medically refractory open-angle glaucoma 1-year US outcomes.",
+      "request": {
+        "query": "XEN gel stent open-angle glaucoma medically refractory IOP outcomes",
+        "keywords": ["31197608"],
+        "target_product": {
+          "target_type": "device",
+          "product_name": "XEN Gel Stent",
+          "device_category": "glaucoma_device",
+          "intended_use": "XEN Gel Stent in medically refractory open-angle glaucoma; serial IOP over 1, 3, 6, and 12 months",
+          "indications": [
+            "open-angle glaucoma",
+            "glaucoma",
+            "open angle glaucoma"
+          ],
+          "anatomical_site": "anterior_segment"
+        },
+        "metrics_of_interest": ["IOP"],
+        "max_results": 5,
+        "pool_size": 30
+      },
+      "expectations": {
+        "golden_pmids": ["31197608"],
+        "min_composite_by_pmid": { "31197608": 0.7 },
+        "max_rank_by_pmid": { "31197608": 5 }
+      }
+    }
+  ]
+}

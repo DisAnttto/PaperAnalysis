@@ -44,6 +44,9 @@ htmlcov/
 # Ruff / linting
 .ruff_cache/
 
+# Cursor
+.cursor-cache/
+
 # Data & outputs (keep sample/)
 data/*
 !data/sample/

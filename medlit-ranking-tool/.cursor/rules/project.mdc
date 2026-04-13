@@ -13,3 +13,7 @@ alwaysApply: true
 - New modules in `app/` must have a corresponding `__init__.py`.
 - Tests live in `tests/` and mirror the `app/` directory structure.
 - Run `ruff check . --fix` and `mypy app/` before considering a task complete.
+- Database access uses SQLAlchemy; define models in `app/models/` and sessions via `app/core/database.py`.
+- Ranking logic must be deterministic and score-based; never rely solely on an LLM to produce a final ranking.
+- All LLM calls must return structured JSON validated by a Pydantic model — no free-text parsing.
+- Update `README.md` whenever a major component (router, service, ingestion source, ranking algorithm) is added.

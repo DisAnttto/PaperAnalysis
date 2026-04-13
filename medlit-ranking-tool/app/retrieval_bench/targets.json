@@ -1,0 +1,539 @@
+[
+  {
+    "benchmark_version": "1.0",
+    "target_id": "drug_bla_761235_vabysmo",
+    "seed": {
+      "source_type": "pubmed_paper",
+      "source_name": "PubMed",
+      "identifier": "PMID:39350227",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/39350227/",
+      "title": "Intravitreal faricimab for treatment naive patients with neovascular age-related macular degeneration: a real-world prospective study"
+    },
+    "extracted_target_profile": {
+      "product_type": "drug",
+      "submission_mode": "BLA",
+      "product_name": "VABYSMO (faricimab-svoa)",
+      "active_ingredient": "faricimab-svoa",
+      "route": "intravitreal",
+      "indication": ["nAMD", "DME"],
+      "key_metrics_or_endpoints": ["BCVA", "OCT thickness", "dosing interval durability"],
+      "key_thresholds": []
+    },
+    "gold_list": [
+      {
+        "tier": "Tier0",
+        "rank_expectation": 1,
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:39350227",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/39350227/",
+        "relation_label": "self_match",
+        "correlation_score": 1.00,
+        "evidence_strength_score": 0.75,
+        "explanation_value_score": 0.90,
+        "rationale": "Self-match: the seed paper itself."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 2,
+        "source_type": "fda_review",
+        "identifier": "BLA:761235 SumR",
+        "url": "https://www.accessdata.fda.gov/drugsatfda_docs/nda/2022/761235Orig1s000SumR.pdf",
+        "relation_label": "direct_review",
+        "correlation_score": 0.95,
+        "evidence_strength_score": 1.00,
+        "explanation_value_score": 0.95,
+        "rationale": "FDA Summary Review for BLA 761235 (VABYSMO approval)."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 3,
+        "source_type": "dailymed_label",
+        "identifier": "SETID:04cc9ef7-dead-beef-0000-000000000001",
+        "url": "https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=04cc9ef7-dead-beef-0000-000000000001",
+        "relation_label": "label",
+        "correlation_score": 0.90,
+        "evidence_strength_score": 0.90,
+        "explanation_value_score": 0.88,
+        "rationale": "DailyMed prescribing label for VABYSMO."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 4,
+        "source_type": "clinicaltrials",
+        "identifier": "NCT03823287",
+        "url": "https://clinicaltrials.gov/study/NCT03823287",
+        "relation_label": "linked_trial",
+        "correlation_score": 0.85,
+        "evidence_strength_score": 0.80,
+        "explanation_value_score": 0.82,
+        "rationale": "TENAYA pivotal trial for faricimab in nAMD."
+      },
+      {
+        "tier": "Tier2",
+        "rank_expectation": 5,
+        "source_type": "clinicaltrials",
+        "identifier": "NCT03823300",
+        "url": "https://clinicaltrials.gov/study/NCT03823300",
+        "relation_label": "linked_trial",
+        "correlation_score": 0.82,
+        "evidence_strength_score": 0.80,
+        "explanation_value_score": 0.80,
+        "rationale": "LUCERNE pivotal trial for faricimab in nAMD."
+      },
+      {
+        "tier": "Tier2",
+        "rank_expectation": 6,
+        "source_type": "clinicaltrials",
+        "identifier": "NCT03622580",
+        "url": "https://clinicaltrials.gov/study/NCT03622580",
+        "relation_label": "same_trial_design_or_comparator_logic",
+        "correlation_score": 0.70,
+        "evidence_strength_score": 0.80,
+        "explanation_value_score": 0.70,
+        "rationale": "YOSEMITE trial for faricimab in DME."
+      },
+      {
+        "tier": "Tier3",
+        "rank_expectation": 7,
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:40242371",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/40242371/",
+        "relation_label": "same_active_ingredient",
+        "correlation_score": 0.60,
+        "evidence_strength_score": 0.50,
+        "explanation_value_score": 0.45,
+        "rationale": "Real-world faricimab outcomes in different population."
+      },
+      {
+        "tier": "Tier4",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000001",
+        "relation_label": "weak_context_only",
+        "correlation_score": 0.35,
+        "evidence_strength_score": 0.35,
+        "explanation_value_score": 0.20,
+        "rationale": "General AMD review -- weak contextual overlap only."
+      },
+      {
+        "tier": "Tier5",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000002",
+        "relation_label": "hard_negative",
+        "correlation_score": 0.10,
+        "evidence_strength_score": 0.60,
+        "explanation_value_score": 0.05,
+        "rationale": "VEGF oncology paper -- same pathway, wrong domain."
+      }
+    ]
+  },
+  {
+    "benchmark_version": "1.0",
+    "target_id": "drug_nda_022315_ozurdex",
+    "seed": {
+      "source_type": "pubmed_paper",
+      "source_name": "PubMed",
+      "identifier": "PMID:24907062",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/24907062/",
+      "title": "Dexamethasone intravitreal implant for treatment of diabetic macular edema"
+    },
+    "extracted_target_profile": {
+      "product_type": "drug",
+      "submission_mode": "NDA",
+      "product_name": "Ozurdex (dexamethasone intravitreal implant)",
+      "active_ingredient": "dexamethasone",
+      "route": "intravitreal",
+      "indication": ["DME"],
+      "key_metrics_or_endpoints": ["BCVA", "central retinal thickness", "injection frequency"],
+      "key_thresholds": []
+    },
+    "gold_list": [
+      {
+        "tier": "Tier0",
+        "rank_expectation": 1,
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:24907062",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/24907062/",
+        "relation_label": "self_match",
+        "correlation_score": 1.00,
+        "evidence_strength_score": 0.75,
+        "explanation_value_score": 0.90,
+        "rationale": "Self-match: the seed paper itself."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 2,
+        "source_type": "fda_review",
+        "identifier": "NDA:022315 SumR",
+        "relation_label": "direct_review",
+        "correlation_score": 0.90,
+        "evidence_strength_score": 1.00,
+        "explanation_value_score": 0.90,
+        "rationale": "FDA Summary Review for NDA 022315 (Ozurdex)."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 3,
+        "source_type": "fda_label",
+        "identifier": "NDA:022315 label",
+        "relation_label": "label",
+        "correlation_score": 0.88,
+        "evidence_strength_score": 0.90,
+        "explanation_value_score": 0.85,
+        "rationale": "FDA label for Ozurdex (NDA 022315)."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 4,
+        "source_type": "dailymed_label",
+        "identifier": "SETID:4b204f44-dead-beef-0000-000000000002",
+        "relation_label": "label",
+        "correlation_score": 0.85,
+        "evidence_strength_score": 0.90,
+        "explanation_value_score": 0.82,
+        "rationale": "DailyMed prescribing label for Ozurdex."
+      },
+      {
+        "tier": "Tier2",
+        "rank_expectation": 5,
+        "source_type": "clinicaltrials",
+        "identifier": "NCT00168337",
+        "url": "https://clinicaltrials.gov/study/NCT00168337",
+        "relation_label": "linked_trial",
+        "correlation_score": 0.70,
+        "evidence_strength_score": 0.80,
+        "explanation_value_score": 0.65,
+        "rationale": "Pivotal trial for dexamethasone intravitreal implant in DME."
+      },
+      {
+        "tier": "Tier3",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:26519345",
+        "relation_label": "same_active_ingredient",
+        "correlation_score": 0.55,
+        "evidence_strength_score": 0.50,
+        "explanation_value_score": 0.40,
+        "rationale": "Dexamethasone comparison study in different ophthalmic condition."
+      },
+      {
+        "tier": "Tier4",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000003",
+        "relation_label": "weak_context_only",
+        "correlation_score": 0.30,
+        "evidence_strength_score": 0.35,
+        "explanation_value_score": 0.18,
+        "rationale": "Generic steroid review paper -- weak contextual overlap."
+      },
+      {
+        "tier": "Tier5",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000004",
+        "relation_label": "hard_negative",
+        "correlation_score": 0.10,
+        "evidence_strength_score": 0.60,
+        "explanation_value_score": 0.05,
+        "rationale": "Systemic dexamethasone in oncology -- same drug, wrong route/domain."
+      }
+    ]
+  },
+  {
+    "benchmark_version": "1.0",
+    "target_id": "device_pma_p040020s087_panoptix",
+    "seed": {
+      "source_type": "pubmed_paper",
+      "source_name": "PubMed",
+      "identifier": "PMID:37641668",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/37641668/",
+      "title": "Visual outcomes with trifocal intraocular lens implantation"
+    },
+    "extracted_target_profile": {
+      "product_type": "device",
+      "submission_mode": "PMA",
+      "product_name": "AcrySof IQ PanOptix Trifocal IOL",
+      "route": null,
+      "indication": ["cataract"],
+      "key_metrics_or_endpoints": ["BCVA", "UDVA", "defocus curve", "contrast sensitivity"],
+      "key_thresholds": []
+    },
+    "gold_list": [
+      {
+        "tier": "Tier0",
+        "rank_expectation": 1,
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:37641668",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/37641668/",
+        "relation_label": "self_match",
+        "correlation_score": 1.00,
+        "evidence_strength_score": 0.70,
+        "explanation_value_score": 0.88,
+        "rationale": "Self-match: the seed paper itself."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 2,
+        "source_type": "fda_pma",
+        "identifier": "P040020/S087",
+        "relation_label": "direct_same_product",
+        "correlation_score": 0.90,
+        "evidence_strength_score": 0.95,
+        "explanation_value_score": 0.88,
+        "rationale": "PMA supplement for AcrySof IQ PanOptix Trifocal IOL."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 3,
+        "source_type": "fda_ssed",
+        "identifier": "P040020S087B SSED",
+        "relation_label": "direct_review",
+        "correlation_score": 0.92,
+        "evidence_strength_score": 1.00,
+        "explanation_value_score": 0.92,
+        "rationale": "SSED for PanOptix PMA supplement approval."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 4,
+        "source_type": "fda_label",
+        "identifier": "P040020S087C patient brochure",
+        "relation_label": "label",
+        "correlation_score": 0.80,
+        "evidence_strength_score": 0.85,
+        "explanation_value_score": 0.75,
+        "rationale": "Patient brochure / labeling for PanOptix IOL."
+      },
+      {
+        "tier": "Tier2",
+        "rank_expectation": 5,
+        "source_type": "fda_pma",
+        "identifier": "P040020S087D clinical amendment",
+        "relation_label": "same_trial_design_or_comparator_logic",
+        "correlation_score": 0.75,
+        "evidence_strength_score": 0.85,
+        "explanation_value_score": 0.72,
+        "rationale": "Clinical amendment supplement sharing study design."
+      },
+      {
+        "tier": "Tier3",
+        "source_type": "pmc_article",
+        "identifier": "PMCID:PMC10445311",
+        "relation_label": "same_device_family",
+        "correlation_score": 0.60,
+        "evidence_strength_score": 0.60,
+        "explanation_value_score": 0.45,
+        "rationale": "Full-text article on related AcrySof IOL model."
+      },
+      {
+        "tier": "Tier4",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000005",
+        "relation_label": "weak_context_only",
+        "correlation_score": 0.30,
+        "evidence_strength_score": 0.35,
+        "explanation_value_score": 0.18,
+        "rationale": "Generic cataract outcomes review."
+      },
+      {
+        "tier": "Tier5",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000006",
+        "relation_label": "hard_negative",
+        "correlation_score": 0.15,
+        "evidence_strength_score": 0.50,
+        "explanation_value_score": 0.08,
+        "rationale": "Contact lens trifocal optics paper -- wrong device type."
+      }
+    ]
+  },
+  {
+    "benchmark_version": "1.0",
+    "target_id": "device_denovo_den180001_idxdr",
+    "seed": {
+      "source_type": "fda_denovo_pdf",
+      "source_name": "FDA De Novo",
+      "identifier": "DEN180001 review",
+      "title": "IDx-DR De Novo Classification Decision"
+    },
+    "extracted_target_profile": {
+      "product_type": "device",
+      "submission_mode": "De_Novo",
+      "product_name": "IDx-DR",
+      "route": null,
+      "indication": ["diabetic_retinopathy"],
+      "key_metrics_or_endpoints": ["sensitivity", "specificity", "imageability rate"],
+      "key_thresholds": []
+    },
+    "gold_list": [
+      {
+        "tier": "Tier0",
+        "rank_expectation": 1,
+        "source_type": "fda_denovo_pdf",
+        "identifier": "DEN180001 review",
+        "relation_label": "self_match",
+        "correlation_score": 1.00,
+        "evidence_strength_score": 1.00,
+        "explanation_value_score": 0.95,
+        "rationale": "Self-match: the De Novo decision review document."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 2,
+        "source_type": "fda_denovo",
+        "identifier": "DEN180001",
+        "relation_label": "direct_same_product",
+        "correlation_score": 0.95,
+        "evidence_strength_score": 0.95,
+        "explanation_value_score": 0.90,
+        "rationale": "FDA De Novo database entry for IDx-DR."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 3,
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:31304320",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/31304320/",
+        "relation_label": "direct_citation",
+        "correlation_score": 0.85,
+        "evidence_strength_score": 0.75,
+        "explanation_value_score": 0.80,
+        "rationale": "Pivotal clinical study paper for IDx-DR."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 4,
+        "source_type": "pmc_article",
+        "identifier": "PMCID:PMC6550188",
+        "relation_label": "direct_citation",
+        "correlation_score": 0.85,
+        "evidence_strength_score": 0.75,
+        "explanation_value_score": 0.80,
+        "rationale": "Full-text version of the IDx-DR pivotal study."
+      },
+      {
+        "tier": "Tier2",
+        "rank_expectation": 5,
+        "source_type": "pmc_article",
+        "identifier": "PMCID:PMC12864748",
+        "relation_label": "same_device_family",
+        "correlation_score": 0.65,
+        "evidence_strength_score": 0.60,
+        "explanation_value_score": 0.45,
+        "rationale": "Real-world performance study of IDx-DR system."
+      },
+      {
+        "tier": "Tier4",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000007",
+        "relation_label": "weak_context_only",
+        "correlation_score": 0.30,
+        "evidence_strength_score": 0.40,
+        "explanation_value_score": 0.20,
+        "rationale": "Generic AI in retinal screening review."
+      },
+      {
+        "tier": "Tier5",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000008",
+        "relation_label": "hard_negative",
+        "correlation_score": 0.10,
+        "evidence_strength_score": 0.50,
+        "explanation_value_score": 0.05,
+        "rationale": "Non-DR AI medical imaging paper."
+      }
+    ]
+  },
+  {
+    "benchmark_version": "1.0",
+    "target_id": "device_510k_k211668_kardiamobile",
+    "seed": {
+      "source_type": "fda_510k_pdf",
+      "source_name": "FDA 510(k)",
+      "identifier": "K211668",
+      "title": "KardiaMobile 6L 510(k) Summary"
+    },
+    "extracted_target_profile": {
+      "product_type": "device",
+      "submission_mode": "510k",
+      "product_name": "KardiaMobile 6L",
+      "route": null,
+      "indication": ["atrial_fibrillation_detection"],
+      "key_metrics_or_endpoints": ["AF detection sensitivity", "AF detection specificity"],
+      "key_thresholds": []
+    },
+    "gold_list": [
+      {
+        "tier": "Tier0",
+        "rank_expectation": 1,
+        "source_type": "fda_510k_pdf",
+        "identifier": "K211668",
+        "relation_label": "self_match",
+        "correlation_score": 1.00,
+        "evidence_strength_score": 0.90,
+        "explanation_value_score": 0.92,
+        "rationale": "Self-match: the 510(k) summary document."
+      },
+      {
+        "tier": "Tier1",
+        "rank_expectation": 2,
+        "source_type": "fda_510k",
+        "identifier": "K211668 listing",
+        "relation_label": "direct_same_product",
+        "correlation_score": 0.95,
+        "evidence_strength_score": 0.95,
+        "explanation_value_score": 0.90,
+        "rationale": "FDA 510(k) database listing for KardiaMobile 6L."
+      },
+      {
+        "tier": "Tier2",
+        "rank_expectation": 3,
+        "source_type": "fda_510k",
+        "identifier": "K191406",
+        "relation_label": "same_device_family",
+        "correlation_score": 0.70,
+        "evidence_strength_score": 0.90,
+        "explanation_value_score": 0.65,
+        "rationale": "510(k) for KardiaMobile System -- same device family."
+      },
+      {
+        "tier": "Tier2",
+        "rank_expectation": 4,
+        "source_type": "fda_510k",
+        "identifier": "K210753",
+        "relation_label": "same_device_family",
+        "correlation_score": 0.75,
+        "evidence_strength_score": 0.90,
+        "explanation_value_score": 0.70,
+        "rationale": "510(k) for KardiaMobile 6L variant -- same device family."
+      },
+      {
+        "tier": "Tier3",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000009",
+        "relation_label": "same_endpoint_or_metric",
+        "correlation_score": 0.45,
+        "evidence_strength_score": 0.50,
+        "explanation_value_score": 0.30,
+        "rationale": "Clinical evaluation paper with AF detection endpoints."
+      },
+      {
+        "tier": "Tier4",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000010",
+        "relation_label": "weak_context_only",
+        "correlation_score": 0.30,
+        "evidence_strength_score": 0.35,
+        "explanation_value_score": 0.18,
+        "rationale": "General wearable ECG review paper."
+      },
+      {
+        "tier": "Tier5",
+        "source_type": "pubmed_paper",
+        "identifier": "PMID:00000011",
+        "relation_label": "hard_negative",
+        "correlation_score": 0.15,
+        "evidence_strength_score": 0.60,
+        "explanation_value_score": 0.10,
+        "rationale": "Hospital 12-lead ECG hardware -- different product class."
+      }
+    ]
+  }
+]

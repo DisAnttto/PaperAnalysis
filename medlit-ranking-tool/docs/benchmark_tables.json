@@ -1,0 +1,467 @@
+﻿[
+  {
+    "table_index": 0,
+    "rows": [
+      [
+        "Tier",
+        "Record (source_type)",
+        "Identifier",
+        "Relation label",
+        "corr",
+        "strength",
+        "explain",
+        "Why it matters"
+      ],
+      [
+        "Tier0",
+        "Seed paper (pubmed_paper)",
+        "PMID:39350227",
+        "self_match",
+        "1.00",
+        "0.75",
+        "0.90",
+        "Rank‑1 positive control. [30]"
+      ],
+      [
+        "Tier1",
+        "FDA Summary Review (fda_review_pdf)",
+        "BLA:761235 SumR",
+        "direct_review",
+        "0.95",
+        "1.00",
+        "0.95",
+        "FDA’s own synthesis ties claims to pivotal trials/endpoints and safety database. [29]"
+      ],
+      [
+        "Tier1",
+        "DailyMed SPL label page (label_html)",
+        "SETID:04cc9ef7…",
+        "label",
+        "0.90",
+        "0.90",
+        "0.88",
+        "Structured labeling for indication/route/warnings used in justification narratives. [31]"
+      ],
+      [
+        "Tier1",
+        "ClinicalTrials.gov TENAYA (trial_record)",
+        "NCT03823287",
+        "linked_trial",
+        "0.85",
+        "0.80",
+        "0.82",
+        "Structured endpoint and comparator definition for pivotal evidence chain. [32]"
+      ],
+      [
+        "Tier2",
+        "ClinicalTrials.gov LUCERNE (trial_record)",
+        "NCT03823300",
+        "linked_trial",
+        "0.82",
+        "0.80",
+        "0.80",
+        "Paired pivotal trial; supports same endpoints and comparator logic. [33]"
+      ],
+      [
+        "Tier2",
+        "YOSEMITE (trial_record)",
+        "NCT03622580",
+        "same_trial_design_or_comparator_logic",
+        "0.70",
+        "0.80",
+        "0.70",
+        "Explains DME claims when seed expands indication or class reasoning. [34]"
+      ],
+      [
+        "Tier3",
+        "Related real‑world faricimab paper (pubmed_paper)",
+        "PMID:40242371",
+        "same_active_ingredient",
+        "0.60",
+        "0.50",
+        "0.45",
+        "Acceptable support: same ingredient and endpoints, less direct than FDA package. [35]"
+      ],
+      [
+        "Tier4",
+        "General AMD review (paper)",
+        "—",
+        "weak_context_only",
+        "0.35",
+        "0.35",
+        "0.20",
+        "Likely semantic hit but weak for justification of endpoints/thresholds."
+      ],
+      [
+        "Tier5",
+        "Unrelated VEGF oncology paper (paper)",
+        "—",
+        "hard_negative",
+        "0.10",
+        "0.60",
+        "0.05",
+        "Shares “VEGF” but wrong route/indication; should rank very low."
+      ]
+    ]
+  },
+  {
+    "table_index": 1,
+    "rows": [
+      [
+        "Tier",
+        "Record (source_type)",
+        "Identifier",
+        "Relation label",
+        "corr",
+        "strength",
+        "explain",
+        "Why it matters"
+      ],
+      [
+        "Tier0",
+        "Seed paper (pubmed_paper)",
+        "PMID:24907062",
+        "self_match",
+        "1.00",
+        "0.75",
+        "0.90",
+        "Rank‑1 positive control. [37]"
+      ],
+      [
+        "Tier1",
+        "FDA Summary Review (fda_review_pdf)",
+        "NDA:022315 SumR",
+        "direct_review",
+        "0.90",
+        "1.00",
+        "0.90",
+        "FDA synthesis for approval logic and evidence basis. [38]"
+      ],
+      [
+        "Tier1",
+        "FDA label PDF (label_pdf)",
+        "NDA:022315 label",
+        "label",
+        "0.88",
+        "0.90",
+        "0.85",
+        "Authoritative indications/contraindications dosing language. [39]"
+      ],
+      [
+        "Tier1",
+        "DailyMed label (label_html)",
+        "SETID:4b204f44…",
+        "label",
+        "0.85",
+        "0.90",
+        "0.82",
+        "In-use labeling; useful for extraction and cross-checking. [40]"
+      ],
+      [
+        "Tier2",
+        "ClinicalTrials.gov DME dexamethasone implant study (trial_record)",
+        "NCT00168337",
+        "linked_trial",
+        "0.70",
+        "0.80",
+        "0.65",
+        "Trial record supplies endpoints/follow-up design in structured form. [41]"
+      ],
+      [
+        "Tier3",
+        "Post-approval observational paper (pubmed_paper)",
+        "PMID:26519345",
+        "same_active_ingredient",
+        "0.55",
+        "0.50",
+        "0.40",
+        "Supportive context on outcomes/safety; not primary regulatory artifact. [42]"
+      ],
+      [
+        "Tier4",
+        "Generic steroid review (paper)",
+        "—",
+        "weak_context_only",
+        "0.30",
+        "0.35",
+        "0.18",
+        "Likely keyword match but too generic to justify Ozurdex claims."
+      ],
+      [
+        "Tier5",
+        "Systemic dexamethasone oncology regimen (paper)",
+        "—",
+        "hard_negative",
+        "0.10",
+        "0.60",
+        "0.05",
+        "Wrong route/delivery; should be deprioritized strongly."
+      ]
+    ]
+  },
+  {
+    "table_index": 2,
+    "rows": [
+      [
+        "Tier",
+        "Record (source_type)",
+        "Identifier",
+        "Relation label",
+        "corr",
+        "strength",
+        "explain",
+        "Why it matters"
+      ],
+      [
+        "Tier0",
+        "Seed paper (pubmed_paper)",
+        "PMID:37641668",
+        "self_match",
+        "1.00",
+        "0.70",
+        "0.88",
+        "Rank‑1 positive control. [44]"
+      ],
+      [
+        "Tier1",
+        "FDA PMA listing (fda_pma_html)",
+        "P040020/S087",
+        "direct_same_product",
+        "0.90",
+        "0.95",
+        "0.88",
+        "Official PMA supplement record for PanOptix Toric trifocal. [45]"
+      ],
+      [
+        "Tier1",
+        "FDA SSED PDF (ssed_pdf)",
+        "P040020S087B",
+        "direct_review",
+        "0.92",
+        "1.00",
+        "0.92",
+        "FDA evidence summary; includes nonclinical/clinical support and material. [46]"
+      ],
+      [
+        "Tier1",
+        "FDA patient brochure (labeling_pdf)",
+        "P040020S087C",
+        "label",
+        "0.80",
+        "0.85",
+        "0.75",
+        "Patient-facing indications/risk language (useful for extraction). [47]"
+      ],
+      [
+        "Tier2",
+        "FDA clinical amendment PDF (pma_attachment_pdf)",
+        "P040020S087D",
+        "same_trial_design_or_comparator_logic",
+        "0.75",
+        "0.85",
+        "0.72",
+        "Describes trial design/comparator; supports endpoint justification. [48]"
+      ],
+      [
+        "Tier3",
+        "Related PMC paper on PanOptix TFNT00 (pmc_fulltext)",
+        "PMCID:PMC10445311",
+        "same_device_family",
+        "0.60",
+        "0.60",
+        "0.45",
+        "Acceptable support: same device model outcomes, less direct than SSED. [49]"
+      ],
+      [
+        "Tier4",
+        "Generic cataract surgery outcomes (paper)",
+        "—",
+        "weak_context_only",
+        "0.30",
+        "0.35",
+        "0.18",
+        "Keyword similarity without device specificity."
+      ],
+      [
+        "Tier5",
+        "Contact lens trifocal optics (paper)",
+        "—",
+        "hard_negative",
+        "0.15",
+        "0.50",
+        "0.08",
+        "“Trifocal” but wrong product category/regulatory bucket."
+      ]
+    ]
+  },
+  {
+    "table_index": 3,
+    "rows": [
+      [
+        "Tier",
+        "Record (source_type)",
+        "Identifier",
+        "Relation label",
+        "corr",
+        "strength",
+        "explain",
+        "Why it matters"
+      ],
+      [
+        "Tier0",
+        "Seed De Novo review PDF (fda_denovo_pdf)",
+        "DEN180001 review",
+        "self_match",
+        "1.00",
+        "1.00",
+        "0.95",
+        "Rank‑1 positive control for De Novo evidence. [51]"
+      ],
+      [
+        "Tier1",
+        "De Novo database entry (fda_denovo_html)",
+        "DEN180001",
+        "direct_same_product",
+        "0.95",
+        "0.95",
+        "0.90",
+        "Official classification name, product code, regulation number, requester. [52]"
+      ],
+      [
+        "Tier1",
+        "Pivotal trial paper in PubMed (pubmed_paper)",
+        "PMID:31304320",
+        "direct_citation",
+        "0.85",
+        "0.75",
+        "0.80",
+        "Pivotal clinical evidence underpinning device performance claim. [53]"
+      ],
+      [
+        "Tier1",
+        "PMC full text (pmc_fulltext)",
+        "PMCID:PMC6550188",
+        "direct_citation",
+        "0.85",
+        "0.75",
+        "0.80",
+        "Full text supports deterministic extraction of endpoints/thresholds. [54]"
+      ],
+      [
+        "Tier2",
+        "Later real-world performance paper (pmc_fulltext)",
+        "PMCID:PMC12864748",
+        "same_device_family",
+        "0.65",
+        "0.60",
+        "0.45",
+        "Useful but weaker than pivotal evidence and FDA De Novo artifact. [55]"
+      ],
+      [
+        "Tier4",
+        "Generic AI-in-retina review (paper)",
+        "—",
+        "weak_context_only",
+        "0.30",
+        "0.40",
+        "0.20",
+        "Often retrieved by keywords but not directly justificatory."
+      ],
+      [
+        "Tier5",
+        "Non-DR AI imaging paper (paper)",
+        "—",
+        "hard_negative",
+        "0.10",
+        "0.50",
+        "0.05",
+        "Shares “AI diagnostic” but different indication and predicate chain."
+      ]
+    ]
+  },
+  {
+    "table_index": 4,
+    "rows": [
+      [
+        "Tier",
+        "Record (source_type)",
+        "Identifier",
+        "Relation label",
+        "corr",
+        "strength",
+        "explain",
+        "Why it matters"
+      ],
+      [
+        "Tier0",
+        "Seed 510(k) summary PDF (fda_510k_pdf)",
+        "K211668",
+        "self_match",
+        "1.00",
+        "0.90",
+        "0.92",
+        "Rank‑1 positive control; contains indications/description/test summary. [57]"
+      ],
+      [
+        "Tier1",
+        "FDA 510(k) listing (fda_510k_html)",
+        "K211668 listing",
+        "direct_same_product",
+        "0.95",
+        "0.95",
+        "0.90",
+        "Official metadata: regulation number, applicant, product code, summary availability. [58]"
+      ],
+      [
+        "Tier2",
+        "Related 510(k) summary for KardiaMobile System (fda_510k_pdf)",
+        "K191406",
+        "same_device_family",
+        "0.70",
+        "0.90",
+        "0.65",
+        "Same product family; supports justification of similar specs/algorithms. [59]"
+      ],
+      [
+        "Tier2",
+        "510(k) summary for KardiaMobile 6L (fda_510k_pdf)",
+        "K210753",
+        "same_device_family",
+        "0.75",
+        "0.90",
+        "0.70",
+        "Adds multi-lead output; helps explain performance/spec evolution. [60]"
+      ],
+      [
+        "Tier3",
+        "Clinical evaluation/review paper (paper)",
+        "—",
+        "same_endpoint_or_metric",
+        "0.45",
+        "0.50",
+        "0.30",
+        "Acceptable support for endpoint interpretation (AF detection), not regulatory artifact. [61]"
+      ],
+      [
+        "Tier4",
+        "General wearable ECG review (paper)",
+        "—",
+        "weak_context_only",
+        "0.30",
+        "0.35",
+        "0.18",
+        "Keyword hits (“ECG wearable”) but weak for predicate-style justification."
+      ],
+      [
+        "Tier5",
+        "Hospital 12‑lead ECG hardware (device)",
+        "—",
+        "hard_negative",
+        "0.15",
+        "0.60",
+        "0.10",
+        "Same domain (ECG) but different regulatory bucket/technology; should rank low."
+      ]
+    ]
+  }
+]

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <title>MedLit QA Console</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ static_v }}" />
+</head>
+<body>
+
+<!-- ═══════════════════════════ STATUS BAR ════════════════════════════ -->
+<header id="status-bar">
+  <span class="brand" data-i18n="brand">MedLit QA Console</span>
+  <span class="status-items">
+    <span class="chip" id="chip-mode">mode: {{ app_mode }}</span>
+    <span class="chip" id="chip-llm">LLM: {{ llm_model }}</span>
+    <span class="chip" id="chip-pubmed">PubMed: {% if app_mode == 'demo' %}mocked{% else %}live{% endif %}</span>
+    <span class="chip" id="chip-health">health: checking…</span>
+    <button class="mode-toggle-btn" onclick="loadExample()" data-i18n="btn_try_example">Try Example</button>
+    <button class="mode-toggle-btn" type="button" onclick="clearAllWork()" data-i18n="btn_clear_all_work">Clear all work</button>
+    <button class="lang-toggle-btn" id="btn-lang" onclick="toggleLang()">中文</button>
+  </span>
+</header>
+
+<div id="layout">
+
+  <!-- ══════════════════════════ SEARCH PANEL ═══════════════════════════ -->
+  <aside id="search-panel">
+    <h2 data-i18n="search_heading">Search</h2>
+
+    <!-- Search presets -->
+    <div class="presets">
+      <span class="label" data-i18n="presets_label">Presets:</span>
+      <button class="preset-btn" onclick="fillPreset('iol_hydrophobic')" data-i18n="preset_iol">Hydrophobic IOL</button>
+      <button class="preset-btn" onclick="fillPreset('faricimab_namd')" data-i18n="preset_faricimab">Faricimab nAMD</button>
+      <button class="preset-btn" onclick="fillPreset('glaucoma_device')" data-i18n="preset_glaucoma">Glaucoma Device</button>
+      <button class="preset-btn" onclick="fillPreset('dexa_dme')" data-i18n="preset_dexa">Dexamethasone DME</button>
+      <button class="preset-btn" onclick="fillPreset('contact_dry_eye')" data-i18n="preset_contact">Contact Lens DED</button>
+    </div>
+
+    <!-- Evidence presets (seed-based) -->
+    <div class="presets">
+      <span class="label" data-i18n="ev_presets_label">Evidence seeds:</span>
+      <button type="button" class="preset-btn" onclick="fillEvidencePreset('faricimab_namd')" data-i18n="ev_preset_faricimab">Faricimab nAMD</button>
+      <button type="button" class="preset-btn" onclick="fillEvidencePreset('ozurdex_dme')" data-i18n="ev_preset_ozurdex">Ozurdex DME</button>
+      <button type="button" class="preset-btn" onclick="fillEvidencePreset('panoptix_iol')" data-i18n="ev_preset_panoptix">PanOptix IOL</button>
+      <button type="button" class="preset-btn" onclick="fillEvidencePreset('idxdr_denovo')" data-i18n="ev_preset_idxdr">IDx-DR De Novo</button>
+      <button type="button" class="preset-btn" onclick="fillEvidencePreset('kardia_510k')" data-i18n="ev_preset_kardia">KardiaMobile 510(k)</button>
+    </div>
+
+    <!-- Gold regression cases (tests/collection/cases.json) -->
+    <div class="field-group">
+      <label for="f-gold-case" data-i18n="label_gold_cases">Gold test cases</label>
+      <select id="f-gold-case" onchange="onGoldCaseSelect()">
+        <option value="" data-i18n="opt_gold_case_none">— Select a gold case —</option>
+      </select>
+    </div>
+
+    <!-- Query (PubMed literature search) -->
+    <div class="field-group">
+      <label for="f-query" data-i18n="label_query">Query <span class="hint">(PubMed)</span></label>
+      <input id="f-query" type="text"
+             data-i18n-ph="ph_query"
+             placeholder="e.g. intraocular lens cataract outcomes" />
+    </div>
+
+    <!-- Seed identifier (correlated evidence) -->
+    <div class="field-group">
+      <label for="ev-seed" data-i18n="ev_label_seed">Seed identifier <span class="hint">(multi-source)</span></label>
+      <input id="ev-seed" type="text"
+             placeholder="e.g. PMID:39350227 or K211668 or DEN180001" />
+      <span class="hint" data-i18n="ev_seed_hint">PMID, 510(k) K-number, NCT, PMA, DEN — fans out to all databases.</span>
+    </div>
+
+    <!-- PubMed query keywords (comma-sep; digits = PMID [UID] pin) -->
+    <div class="field-group">
+      <label for="f-keywords" data-i18n="label_keywords">Keywords (optional)</label>
+      <input id="f-keywords" type="text"
+             data-i18n-ph="ph_keywords"
+             placeholder="e.g. 39350227 or phrase for [Title/Abstract]" />
+      <span class="hint" data-i18n="hint_keywords">Comma-separated; numeric tokens become PMID UID filters.</span>
+    </div>
+
+    <!-- Target type -->
+    <div class="field-group">
+      <label for="f-target-type" data-i18n="label_target_type">Target type</label>
+      <select id="f-target-type">
+        <option value="device" data-i18n="opt_device">device</option>
+        <option value="drug"   data-i18n="opt_drug">drug</option>
+        <option value="both"   data-i18n="opt_both">both</option>
+      </select>
+    </div>
+
+    <!-- Collapsible: Device fields -->
+    <details open>
+      <summary data-i18n="summary_device">Device fields</summary>
+      <div class="field-group"><label data-i18n="label_product_name">Product name</label><input id="f-product-name" type="text" data-i18n-ph="ph_product_name" placeholder="e.g. AcrySof IQ" /></div>
+      <div class="field-group"><label data-i18n="label_device_category">Device category</label><input id="f-device-category" type="text" data-i18n-ph="ph_device_category" placeholder="e.g. intraocular_lens" /></div>
+      <div class="field-group"><label data-i18n="label_manufacturer">Manufacturer</label><input id="f-manufacturer" type="text" data-i18n-ph="ph_manufacturer" placeholder="e.g. Alcon" /></div>
+      <div class="field-group"><label data-i18n="label_intended_use">Intended use</label><input id="f-intended-use" type="text" data-i18n-ph="ph_intended_use" placeholder="e.g. cataract surgery" /></div>
+      <div class="field-group"><label data-i18n="label_indications">Indications <span class="hint" data-i18n="hint_comma_sep">(comma-sep)</span></label><input id="f-indications" type="text" data-i18n-ph="ph_indications" placeholder="e.g. cataract, glaucoma" /></div>
+      <div class="field-group"><label data-i18n="label_anatomical_site">Anatomical site</label><input id="f-anatomical-site" type="text" data-i18n-ph="ph_anatomical_site" placeholder="e.g. lens_capsule" /></div>
+      <div class="field-group"><label data-i18n="label_material_family">Material family</label><input id="f-material-family" type="text" data-i18n-ph="ph_material_family" placeholder="e.g. acrylic" /></div>
+      <div class="field-group"><label data-i18n="label_material_subtype">Material subtype</label><input id="f-material-subtype" type="text" data-i18n-ph="ph_material_subtype" placeholder="e.g. hydrophobic_acrylic" /></div>
+      <div class="field-group"><label data-i18n="label_material_features">Material features <span class="hint" data-i18n="hint_comma_sep">(comma-sep)</span></label><input id="f-material-features" type="text" data-i18n-ph="ph_material_features" placeholder="e.g. aspheric, uv_filter" /></div>
+      <div class="field-group"><label data-i18n="label_key_features">Key features <span class="hint" data-i18n="hint_comma_sep">(comma-sep)</span></label><input id="f-key-features" type="text" data-i18n-ph="ph_key_features" placeholder="e.g. trifocal, PanOptix" /></div>
+    </details>
+
+    <!-- Collapsible: Drug fields -->
+    <details>
+      <summary data-i18n="summary_drug">Drug fields</summary>
+      <div class="field-group"><label data-i18n="label_active_ingredient">Active ingredient</label><input id="f-active-ingredient" type="text" data-i18n-ph="ph_active_ingredient" placeholder="e.g. ranibizumab" /></div>
+      <div class="field-group"><label data-i18n="label_drug_class">Drug class</label><input id="f-drug-class" type="text" data-i18n-ph="ph_drug_class" placeholder="e.g. anti_vegf" /></div>
+      <div class="field-group"><label data-i18n="label_route">Route</label><input id="f-route" type="text" data-i18n-ph="ph_route" placeholder="e.g. intravitreal" /></div>
+    </details>
+
+    <!-- Collapsible: Evidence profile override -->
+    <details id="ev-profile-details">
+      <summary data-i18n="ev_summary_profile">Evidence profile (optional)</summary>
+      <div class="field-group">
+        <label for="ev-product-name" data-i18n="ev_label_product_name">Product name</label>
+        <input id="ev-product-name" type="text" placeholder="e.g. VABYSMO (faricimab-svoa)" />
+      </div>
+      <div class="field-group">
+        <label for="ev-ingredient" data-i18n="ev_label_ingredient">Active ingredient / device name</label>
+        <input id="ev-ingredient" type="text" placeholder="e.g. faricimab-svoa" />
+      </div>
+      <div class="field-group">
+        <label for="ev-route" data-i18n="ev_label_route">Route (evidence)</label>
+        <input id="ev-route" type="text" placeholder="e.g. intravitreal" />
+      </div>
+      <div class="field-group">
+        <label for="ev-indication" data-i18n="ev_label_indication">Indication (comma-sep)</label>
+        <input id="ev-indication" type="text" placeholder="e.g. nAMD, DME" />
+      </div>
+      <div class="field-group">
+        <label for="ev-endpoints" data-i18n="ev_label_endpoints">Key endpoints (comma-sep)</label>
+        <input id="ev-endpoints" type="text" placeholder="e.g. BCVA, OCT thickness" />
+      </div>
+      <div class="field-group">
+        <label for="ev-product-type" data-i18n="ev_label_product_type">Product type</label>
+        <select id="ev-product-type">
+          <option value="unknown" data-i18n="ev_opt_unknown">Unknown</option>
+          <option value="drug" data-i18n="opt_drug">Drug</option>
+          <option value="device" data-i18n="opt_device">Device</option>
+        </select>
+      </div>
+    </details>
+
+    <!-- Collapsible: Metrics of Interest -->
+    <details id="metrics-details">
+      <summary data-i18n="summary_metrics">Metrics of Interest</summary>
+      <div class="metrics-presets">
+        <span class="label" data-i18n="presets_label">Presets:</span>
+        <button class="metric-preset-btn" onclick="fillMetricPreset('cataract_iol')" data-i18n="preset_cataract">Cataract / IOL</button>
+        <button class="metric-preset-btn" onclick="fillMetricPreset('antivegf_retina')" data-i18n="preset_retina">Anti-VEGF / Retina</button>
+        <button class="metric-preset-btn" onclick="fillMetricPreset('glaucoma')" data-i18n="preset_glaucoma_m">Glaucoma</button>
+      </div>
+      <div class="metric-input-row">
+        <input id="f-metric-input" type="text"
+               data-i18n-ph="ph_metric_input"
+               placeholder="e.g. BCVA, IOP, injection frequency" />
+        <button class="add-metric-btn" onclick="addMetricFromInput()" data-i18n="btn_add">Add</button>
+      </div>
+      <div id="metric-chips" class="metric-chips-container"></div>
+      <div class="metric-footer">
+        <span id="metric-count" class="metric-count"></span>
+        <button class="clear-metrics-link" onclick="clearAllMetrics()" data-i18n="btn_clear_all">Clear all</button>
+      </div>
+    </details>
+
+    <!-- Collapsible: Search Filters -->
+    <details id="filters-details">
+      <summary data-i18n="summary_filters">Search Filters</summary>
+      <div class="field-group">
+        <label for="f-max-results" data-i18n="label_num_papers">Number of papers</label>
+        <select id="f-max-results">
+          <option value="5"  data-i18n="opt_5_papers">5 papers</option>
+          <option value="10" data-i18n="opt_10_papers">10 papers</option>
+          <option value="20" data-i18n="opt_20_papers" selected>20 papers</option>
+          <option value="50" data-i18n="opt_50_papers">50 papers</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label for="f-pool-size" data-i18n="label_pool_size">Pool size (per database)</label>
+        <select id="f-pool-size">
+          <option value="30"  data-i18n="opt_pool_30">30 results</option>
+          <option value="50"  data-i18n="opt_pool_50">50 results</option>
+          <option value="100" data-i18n="opt_pool_100" selected>100 results</option>
+          <option value="200" data-i18n="opt_pool_200">200 results</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label data-i18n="label_year_range">Publication year range</label>
+        <div class="year-range-row">
+          <input id="f-year-min" type="number" data-i18n-ph="ph_year_from" placeholder="From" min="1900" max="2100" />
+          <span class="year-sep">–</span>
+          <input id="f-year-max" type="number" data-i18n-ph="ph_year_to" placeholder="To" min="1900" max="2100" />
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="f-country" data-i18n="label_country">Country / affiliation</label>
+        <input id="f-country" type="text" data-i18n-ph="ph_country" placeholder="e.g. United States, China" />
+      </div>
+    </details>
+
+    <!-- Collapsible: Weights -->
+    <details>
+      <summary data-i18n="summary_weights">Ranking weights</summary>
+      <div class="weights-grid">
+        <span data-i18n="weight_R">Relevance (R)</span>
+        <input id="w-R" type="number" step="0.05" min="0" max="1" value="0.35" />
+        <span data-i18n="weight_P">Product sim (P)</span>
+        <input id="w-P" type="number" step="0.05" min="0" max="1" value="0.25" />
+        <span data-i18n="weight_M">Metric favor (M)</span>
+        <input id="w-M" type="number" step="0.05" min="0" max="1" value="0.20" />
+        <span data-i18n="weight_E">Evidence (E)</span>
+        <input id="w-E" type="number" step="0.05" min="0" max="1" value="0.20" />
+      </div>
+      <p id="weight-sum-warning" class="warning hidden" data-i18n="warning_weights">Weights must sum to 1.0</p>
+    </details>
+
+    <div class="btn-row">
+      <button id="btn-search" onclick="runUnifiedSearch()" data-i18n="btn_run_search">Run Search</button>
+      <button class="secondary" onclick="clearForm()" data-i18n="btn_clear">Clear</button>
+    </div>
+
+    <div id="search-error" class="error-msg hidden"></div>
+    <div id="ev-error" class="error-msg hidden"></div>
+  </aside>
+
+  <!-- ═══════════════════════════ MAIN AREA ════════════════════════════ -->
+  <main id="main-area">
+
+    <!-- Pipeline stepper (visible while PubMed streaming) -->
+    <section id="progress-section" class="hidden">
+      <div class="stepper">
+        <div class="step" id="step-1" data-phase="searching" data-status="pending">
+          <div class="step-dot"><span>1</span></div>
+          <div class="step-content">
+            <div class="step-label">
+              <span data-i18n="step_pubmed_title">Database Search</span>
+              <span class="step-badge" id="step-1-badge"></span>
+            </div>
+            <div class="step-detail" id="step-1-detail"></div>
+          </div>
+          <button type="button" id="btn-stop" class="stop-btn hidden" onclick="stopSearch()" data-i18n="btn_stop">Stop</button>
+        </div>
+        <div class="step" id="step-2" data-phase="triaging" data-status="pending">
+          <div class="step-dot"><span>2</span></div>
+          <div class="step-content">
+            <div class="step-label">
+              <span data-i18n="step_triage_title">AI Triage</span>
+              <span class="step-badge" id="step-2-badge"></span>
+            </div>
+            <div class="step-detail" id="step-2-detail"></div>
+          </div>
+        </div>
+        <div class="step" id="step-3" data-phase="extracting" data-status="pending">
+          <div class="step-dot"><span>3</span></div>
+          <div class="step-content">
+            <div class="step-label">
+              <span data-i18n="step_extract_title">Extract + Score</span>
+              <span class="step-badge" id="step-3-badge"></span>
+            </div>
+            <div class="step-detail" id="step-3-detail">
+              <div id="step-extract-subline" class="extract-subline"></div>
+              <div class="extract-progress">
+                <div id="progress-bar" class="extract-progress-fill"></div>
+              </div>
+              <div id="progress-papers" class="progress-papers"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PubMed Literature Results table -->
+    <section id="results-section" class="hidden">
+      <div class="results-header">
+        <h2><span data-i18n="results_heading">Results</span> <span id="results-count"></span></h2>
+        <span id="results-mode-badge" class="chip"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th data-col="rank"                   onclick="sortTable('rank')"                   data-i18n="col_rank">#</th>
+              <th data-col="title"                  onclick="sortTable('title')"                  data-i18n="col_title">Title</th>
+              <th data-col="year"                   onclick="sortTable('year')"                   data-i18n="col_year">Year</th>
+              <th data-col="pmid"                                                                 data-i18n="col_pmid">PMID</th>
+              <th data-col="composite_score"        onclick="sortTable('composite_score')"        data-i18n="col_score">Score</th>
+              <th data-col="relevance_score"        onclick="sortTable('relevance_score')"
+                  data-i18n="col_R"
+                  data-i18n-title="col_R_title"
+                  title="Relevance — query &amp; topic match">Relevance</th>
+              <th data-col="product_similarity_score" onclick="sortTable('product_similarity_score')"
+                  data-i18n="col_P"
+                  data-i18n-title="col_P_title"
+                  title="Product Similarity — device/drug match">Product</th>
+              <th data-col="metric_favorability_score" onclick="sortTable('metric_favorability_score')"
+                  data-i18n="col_M"
+                  data-i18n-title="col_M_title"
+                  title="Metric Favorability — target metric match">Metric</th>
+              <th data-col="evidence_quality_score" onclick="sortTable('evidence_quality_score')"
+                  data-i18n="col_E"
+                  data-i18n-title="col_E_title"
+                  title="Evidence Quality — study design &amp; sample size">Evidence</th>
+              <th data-col="metrics_count"
+                  data-i18n="col_metrics"
+                  data-i18n-title="col_metrics_title"
+                  title="When you list metrics of interest (and no structured targets), chips match what counts toward the Metric (M) column.">Metrics of Interest</th>
+              <th                                                                                  data-i18n="col_rationale">Rationale</th>
+            </tr>
+          </thead>
+          <tbody id="results-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Correlated Evidence progress (shown while /correlate is running) -->
+    <section id="ev-progress" class="hidden">
+      <div class="ev-spinner">
+        <span class="ev-spinner-dot" aria-hidden="true"></span>
+      </div>
+      <p id="ev-progress-msg" data-i18n="ev_progress_msg">Searching all sources…</p>
+    </section>
+
+    <!-- Correlated Evidence source chips + results table -->
+    <div id="ev-source-row" class="hidden">
+      <span class="label" data-i18n="ev_sources_label">Sources:</span>
+      <span class="source-chip" data-source="pubmed_paper" data-label="PubMed">PubMed</span>
+      <span class="source-chip" data-source="fda_510k" data-label="openFDA 510(k)">openFDA 510(k)</span>
+      <span class="source-chip" data-source="fda_label" data-label="FDA Label">FDA Label</span>
+      <span class="source-chip" data-source="clinicaltrials" data-label="ClinicalTrials.gov">ClinicalTrials.gov</span>
+      <span class="source-chip" data-source="dailymed_label" data-label="DailyMed">DailyMed</span>
+      <span class="source-chip" data-source="accessgudid_device" data-label="AccessGUDID">AccessGUDID</span>
+    </div>
+
+    <section id="ev-results" class="hidden">
+      <div class="results-header">
+        <h2>
+          <span data-i18n="ev_results_heading">Correlated Evidence</span>
+          <span id="ev-results-count"></span>
+        </h2>
+      </div>
+      <div class="table-wrap">
+        <table id="ev-table">
+          <thead>
+            <tr>
+              <th data-col="rank" data-i18n="col_rank">#</th>
+              <th data-col="source" data-i18n="ev_col_source">Source</th>
+              <th data-col="tier" data-i18n="ev_col_tier">Tier</th>
+              <th data-col="identifier" data-i18n="ev_col_identifier">Identifier</th>
+              <th data-col="title" data-i18n="col_title">Title</th>
+              <th data-col="corr" data-i18n="ev_col_corr">Corr</th>
+              <th data-col="strength" data-i18n="ev_col_strength">Strength</th>
+              <th data-col="expl" data-i18n="ev_col_expl">Expl</th>
+              <th data-col="relation" data-i18n="ev_col_relation">Relation</th>
+            </tr>
+          </thead>
+          <tbody id="ev-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Empty state -->
+    <div id="empty-state">
+      <p data-i18n="empty_state">Select a preset or enter a query and/or seed identifier, then click <strong>Run Search</strong>.</p>
+    </div>
+
+  </main>
+</div>
+
+<script src="/static/app.js?v={{ static_v }}"></script>
+</body>
+</html>

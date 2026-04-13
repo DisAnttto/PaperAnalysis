@@ -19,6 +19,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+asyncio_mode = "auto"
+markers = [
+    "live: marks tests that make real HTTP calls (deselect with -m 'not live')",
+    "slow: marks slow benchmark tests (deselect with -m 'not slow')",
+]
 
 [tool.ruff]
 line-length = 88
