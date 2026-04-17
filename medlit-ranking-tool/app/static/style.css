@@ -1730,3 +1730,180 @@ tr.ev-detail-row td {
 tr.gold-anchor-row td:first-child {
   border-left: 3px solid #b8860b;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GPT-style visual refresh (visuals only, workflow unchanged)
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --text: #1f2937;
+  --text-muted: #6b7280;
+  --accent: #111827;
+  --accent-light: #f3f4f6;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+body {
+  background: linear-gradient(180deg, #fbfbfc 0%, #f5f6f8 100%);
+  color: var(--text);
+}
+
+#status-bar {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+
+.brand {
+  letter-spacing: 0.01em;
+  font-size: 14px;
+}
+
+.chip {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  color: #4b5563;
+}
+
+.mode-toggle-btn,
+.lang-toggle-btn {
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+}
+
+.mode-toggle-btn:hover,
+.lang-toggle-btn:hover {
+  background: #f9fafb;
+  color: #111827;
+}
+
+#search-panel {
+  width: 360px;
+  background: transparent;
+  border-right: 1px solid var(--border);
+  padding: 18px 16px 24px;
+}
+
+.workflow-intro {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow);
+}
+
+.workflow-intro p {
+  font-size: 12px;
+  color: #4b5563;
+  margin-bottom: 4px;
+}
+
+.workflow-intro p:last-child {
+  margin-bottom: 0;
+}
+
+.nl-chat-box {
+  border: 1px solid #e5e7eb;
+  border-left: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+}
+
+.nl-chat-box textarea {
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  min-height: 74px;
+}
+
+.nl-chat-actions button,
+#btn-search {
+  border-radius: 999px;
+  background: #111827;
+  border: 1px solid #111827;
+}
+
+.nl-chat-actions button:hover,
+#btn-search:hover {
+  background: #000;
+}
+
+details {
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(17, 24, 39, 0.02);
+}
+
+.field-group input,
+.field-group select,
+.metric-input-row input,
+.year-range-row input {
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  padding: 8px 10px;
+}
+
+.preset-btn,
+.metric-preset-btn {
+  border-radius: 999px;
+  background: #f9fafb;
+  border: 1px solid #d1d5db;
+  color: #374151;
+}
+
+.preset-btn:hover,
+.metric-preset-btn:hover {
+  background: #111827;
+  border-color: #111827;
+}
+
+#main-area {
+  padding: 18px;
+}
+
+#progress-section,
+.table-wrap,
+.detail-card,
+#gold-validation-panel {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+#results-table thead th,
+.metrics-table thead th {
+  background: #f9fafb;
+}
+
+#results-table tbody tr:not(.detail-row):hover,
+#ev-table tbody tr:hover td {
+  background: #f9fafb;
+}
+
+#results-table tbody tr:not(.detail-row).selected {
+  background: #eef2ff;
+}
+
+.step[data-status="active"] .step-dot {
+  background: #111827;
+  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.18);
+}
+
+.extract-progress-fill,
+.score-bar,
+.ev-feature-fill {
+  background: #111827;
+}
+
+.json-block {
+  background: #111827;
+}
