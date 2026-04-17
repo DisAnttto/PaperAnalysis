@@ -8,6 +8,8 @@ combined pool into triage which trims to ``max_results``.
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -262,6 +264,261 @@ class PoolResult:
     source_counts: dict[str, int] = field(default_factory=dict)
 
 
+# Human-readable labels for streaming UI / logs
+_SOURCE_DISPLAY = {
+    "PubMed": "PubMed",
+    "OpenAlex": "OpenAlex",
+    "openFDA_device": "openFDA (device)",
+    "openFDA_drug": "openFDA (drug)",
+    "ClinicalTrials": "ClinicalTrials.gov",
+    "DailyMed": "DailyMed",
+    "AccessGUDID": "AccessGUDID",
+    "PubMed_supplementary": "PubMed (supplementary)",
+}
+
+
+def _display_source(label: str) -> str:
+    return _SOURCE_DISPLAY.get(label, label)
+
+
+def _convert_raw_to_papers(label: str, raw: list[Any]) -> list[Paper]:
+    """Turn a raw per-source API list into ``Paper`` objects (same as ``search_all_sources``)."""
+    if label == "PubMed" or label == "PubMed_supplementary":
+        out: list[Paper] = []
+        for p in raw:
+            if isinstance(p, Paper):
+                if not p.identifier:
+                    p.identifier = p.pmid
+                out.append(p)
+        return out
+    if label == "OpenAlex":
+        out = []
+        for work in raw:
+            paper = _openalex_to_paper(work)
+            if paper:
+                out.append(paper)
+        return out
+    if label == "openFDA_device":
+        out = []
+        for rec in raw:
+            paper = _510k_to_paper(rec)
+            if paper:
+                out.append(paper)
+        return out
+    if label == "openFDA_drug":
+        out = []
+        for rec in raw:
+            paper = _drug_label_to_paper(rec)
+            if paper:
+                out.append(paper)
+        return out
+    if label == "ClinicalTrials":
+        out = []
+        for study in raw:
+            paper = _trial_to_paper(study)
+            if paper:
+                out.append(paper)
+        return out
+    if label == "DailyMed":
+        out = []
+        for item in raw:
+            paper = _dailymed_to_paper(item)
+            if paper:
+                out.append(paper)
+        return out
+    if label == "AccessGUDID":
+        out = []
+        for item in raw:
+            paper = _gudid_to_paper(item)
+            if paper:
+                out.append(paper)
+        return out
+    return []
+
+
+def _dedupe_new_batch(
+    batch: list[Paper],
+    seen_uids: set[str],
+    seen_dois: set[str],
+) -> list[Paper]:
+    """Append-only global dedup: return papers in *batch* not yet in *seen_* sets."""
+    new: list[Paper] = []
+    for p in batch:
+        key = p.uid
+        doi_key = (p.doi or "").strip().lower()
+        if key in seen_uids:
+            continue
+        if doi_key and doi_key in seen_dois:
+            continue
+        seen_uids.add(key)
+        if doi_key:
+            seen_dois.add(doi_key)
+        new.append(p)
+    return new
+
+
+async def _timed_await(label: str, coro: Any) -> tuple[str, list[Any], float]:
+    """Await one source fetch and return (label, raw_list, duration_ms)."""
+    t0 = time.perf_counter()
+    try:
+        raw = await coro
+    except Exception as exc:
+        logger.warning("Pool fetch [{}] failed: {}", label, exc)
+        raw = []
+    data = raw if isinstance(raw, list) else []
+    dt_ms = (time.perf_counter() - t0) * 1000.0
+    return label, data, dt_ms
+
+
+async def iter_pool_sources(
+    query: str,
+    target_product: TargetProductProfile | None,
+    pool_size: int,
+    *,
+    keywords: list[str] | None = None,
+    min_year: int | None = None,
+    max_year: int | None = None,
+    country: str | None = None,
+    enabled_sources: frozenset[str] | None = None,
+    budget_overrides: dict[str, int] | None = None,
+) -> AsyncIterator[tuple[str, list[Paper], float]]:
+    """Yield ``(source_key, papers, duration_ms)`` as each database finishes.
+
+    Parallel sources complete in completion order (not fixed order).  Papers are
+    converted to :class:`Paper`.  Global deduplication is applied by
+    :func:`search_all_sources` or the streaming search handler.  Supplementary
+    PubMed runs after all parallel sources and is yielded as
+    ``PubMed_supplementary`` when non-empty.
+    """
+    _enabled = enabled_sources or frozenset({
+        "PubMed", "OpenAlex", "openFDA_device", "openFDA_drug",
+        "ClinicalTrials", "DailyMed", "AccessGUDID",
+    })
+    _budgets = budget_overrides or {}
+
+    def _budget(source_name: str) -> int:
+        return _budgets.get(source_name, pool_size)
+
+    free_text = _build_query_term(query, target_product)
+    pubmed_term = build_pubmed_query(query, target_product, keywords or None)
+
+    openfda = OpenFDAClient(settings)
+    ct = ClinicalTrialsClient(settings)
+    dm = DailyMedClient(settings)
+    gudid = AccessGUDIDClient(settings)
+    oalex = OpenAlexClient(settings)
+
+    ct_condition = None
+    ct_intervention = None
+    if target_product:
+        ct_condition = " ".join(
+            i.replace("_", " ") for i in target_product.indications[:2]
+        ) or None
+        ct_intervention = (
+            target_product.product_name
+            or target_product.active_ingredient
+            or None
+        )
+
+    async def _noop() -> list[Any]:
+        return []
+
+    pending: set[asyncio.Task] = set()
+
+    def _add(label: str, coro: Any) -> None:
+        pending.add(asyncio.create_task(_timed_await(label, coro)))
+
+    if "PubMed" in _enabled:
+        _add(
+            "PubMed",
+            _safe(
+                search_pubmed(
+                    pubmed_term,
+                    max_results=_budget("PubMed"),
+                    min_year=min_year,
+                    max_year=max_year,
+                    country=country,
+                    target=target_product,
+                    free_text_fallback=free_text,
+                ),
+                "PubMed",
+            ),
+        )
+    if "OpenAlex" in _enabled:
+        _add("OpenAlex", _safe(oalex.search_works(free_text, limit=_budget("OpenAlex")), "OpenAlex"))
+    if "openFDA_device" in _enabled:
+        _add(
+            "openFDA_device",
+            _safe(openfda.search_device(free_text, limit=_budget("openFDA_device")), "openFDA_device"),
+        )
+    if "openFDA_drug" in _enabled:
+        _add(
+            "openFDA_drug",
+            _safe(openfda.search_drug_label(free_text, limit=_budget("openFDA_drug")), "openFDA_drug"),
+        )
+    if "ClinicalTrials" in _enabled:
+        _add(
+            "ClinicalTrials",
+            _safe(
+                ct.search_studies(
+                    query=free_text if not (ct_condition or ct_intervention) else None,
+                    condition=ct_condition,
+                    intervention=ct_intervention,
+                    limit=_budget("ClinicalTrials"),
+                ),
+                "ClinicalTrials",
+            ),
+        )
+    if "DailyMed" in _enabled:
+        _add(
+            "DailyMed",
+            _safe(
+                dm.search_spls(
+                    target_product.active_ingredient or target_product.product_name or free_text
+                    if target_product else free_text,
+                    limit=_budget("DailyMed"),
+                ),
+                "DailyMed",
+            ),
+        )
+    if "AccessGUDID" in _enabled:
+        _add(
+            "AccessGUDID",
+            _safe(
+                gudid.search_devices(
+                    brand_name=target_product.product_name or free_text if target_product else free_text,
+                ),
+                "AccessGUDID",
+            ),
+        )
+
+    primary_pmids: set[str] = set()
+    while pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            label, raw, dt_ms = task.result()
+            papers = _convert_raw_to_papers(label, raw)
+            if label == "PubMed":
+                primary_pmids = {p.uid for p in papers if p.uid}
+            yield label, papers, dt_ms
+
+    if "PubMed" in _enabled and keywords:
+        t0 = time.perf_counter()
+        supp = await _supplementary_pubmed(
+            query,
+            target_product,
+            keywords,
+            max_results=_budget("PubMed"),
+            min_year=min_year,
+            max_year=max_year,
+            country=country,
+            primary_pmids=primary_pmids,
+        )
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        if supp:
+            yield "PubMed_supplementary", supp, dt_ms
+
+
 async def _supplementary_pubmed(
     query: str,
     target_product: TargetProductProfile | None,
@@ -397,198 +654,38 @@ async def search_all_sources(
 ) -> PoolResult:
     """Fan out to every database and return a unified, deduplicated paper pool.
 
-    Each database returns up to *pool_size* results (or the budget override).
-    When *enabled_sources* is provided, only those sources are queried.
-    The caller is expected to pass the combined pool through triage to trim
-    to ``max_results``.
+    Uses :func:`iter_pool_sources` internally (same completion-order dedup as the
+    streaming search UI).
     """
-    _enabled = enabled_sources or frozenset({
-        "PubMed", "OpenAlex", "openFDA_device", "openFDA_drug",
-        "ClinicalTrials", "DailyMed", "AccessGUDID",
-    })
-    _budgets = budget_overrides or {}
-
-    def _budget(source_name: str) -> int:
-        return _budgets.get(source_name, pool_size)
-
-    free_text = _build_query_term(query, target_product)
-
-    # --- Build PubMed query (structured, uses target profile) ---
-    pubmed_term = build_pubmed_query(query, target_product, keywords or None)
-
-    # --- Instantiate clients ---
-    openfda = OpenFDAClient(settings)
-    ct = ClinicalTrialsClient(settings)
-    dm = DailyMedClient(settings)
-    gudid = AccessGUDIDClient(settings)
-    oalex = OpenAlexClient(settings)
-
-    # --- ClinicalTrials query construction ---
-    ct_condition = None
-    ct_intervention = None
-    if target_product:
-        ct_condition = " ".join(
-            i.replace("_", " ") for i in target_product.indications[:2]
-        ) or None
-        ct_intervention = (
-            target_product.product_name
-            or target_product.active_ingredient
-            or None
-        )
-
-    # --- Fan out in parallel (only enabled sources) ---
-    async def _noop() -> list:
-        return []
-
-    tasks = [
-        _safe(search_pubmed(
-            pubmed_term,
-            max_results=_budget("PubMed"),
-            min_year=min_year,
-            max_year=max_year,
-            country=country,
-            target=target_product,
-            free_text_fallback=free_text,
-        ), "PubMed")
-        if "PubMed" in _enabled else _noop(),
-
-        _safe(oalex.search_works(free_text, limit=_budget("OpenAlex")), "OpenAlex")
-        if "OpenAlex" in _enabled else _noop(),
-
-        _safe(openfda.search_device(free_text, limit=_budget("openFDA_device")), "openFDA_device")
-        if "openFDA_device" in _enabled else _noop(),
-
-        _safe(openfda.search_drug_label(free_text, limit=_budget("openFDA_drug")), "openFDA_drug")
-        if "openFDA_drug" in _enabled else _noop(),
-
-        _safe(ct.search_studies(
-            query=free_text if not (ct_condition or ct_intervention) else None,
-            condition=ct_condition,
-            intervention=ct_intervention,
-            limit=_budget("ClinicalTrials"),
-        ), "ClinicalTrials")
-        if "ClinicalTrials" in _enabled else _noop(),
-
-        _safe(dm.search_spls(
-            target_product.active_ingredient or target_product.product_name or free_text
-            if target_product else free_text,
-            limit=_budget("DailyMed"),
-        ), "DailyMed")
-        if "DailyMed" in _enabled else _noop(),
-
-        _safe(gudid.search_devices(
-            brand_name=target_product.product_name or free_text if target_product else free_text,
-        ), "AccessGUDID")
-        if "AccessGUDID" in _enabled else _noop(),
-    ]
-
-    (
-        pubmed_papers,
-        oalex_works,
-        openfda_devices,
-        openfda_drugs,
-        ct_studies,
-        dm_results,
-        gudid_results,
-    ) = await asyncio.gather(*tasks)
-
-    # --- Convert and collect ---
-    all_papers: list[Paper] = []
-    counts: dict[str, int] = {}
-
-    # PubMed (already Paper objects)
-    for p in pubmed_papers:
-        if isinstance(p, Paper):
-            if not p.identifier:
-                p.identifier = p.pmid
-            all_papers.append(p)
-    counts["PubMed"] = len([p for p in pubmed_papers if isinstance(p, Paper)])
-
-    n = 0
-    for work in oalex_works:
-        paper = _openalex_to_paper(work)
-        if paper:
-            all_papers.append(paper)
-            n += 1
-    counts["OpenAlex"] = n
-
-    n = 0
-    for rec in openfda_devices:
-        paper = _510k_to_paper(rec)
-        if paper:
-            all_papers.append(paper)
-            n += 1
-    counts["openFDA_device"] = n
-
-    n = 0
-    for rec in openfda_drugs:
-        paper = _drug_label_to_paper(rec)
-        if paper:
-            all_papers.append(paper)
-            n += 1
-    counts["openFDA_drug"] = n
-
-    n = 0
-    for study in ct_studies:
-        paper = _trial_to_paper(study)
-        if paper:
-            all_papers.append(paper)
-            n += 1
-    counts["ClinicalTrials"] = n
-
-    n = 0
-    for item in dm_results:
-        paper = _dailymed_to_paper(item)
-        if paper:
-            all_papers.append(paper)
-            n += 1
-    counts["DailyMed"] = n
-
-    n = 0
-    for item in gudid_results:
-        paper = _gudid_to_paper(item)
-        if paper:
-            all_papers.append(paper)
-            n += 1
-    counts["AccessGUDID"] = n
-
-    # --- Supplementary PubMed queries for metric-focused recall ---
-    if "PubMed" in _enabled and keywords:
-        primary_pmids = {p.uid for p in all_papers if p.uid}
-        supp_papers = await _supplementary_pubmed(
-            query, target_product, keywords,
-            max_results=_budget("PubMed"),
-            min_year=min_year, max_year=max_year, country=country,
-            primary_pmids=primary_pmids,
-        )
-        if supp_papers:
-            all_papers.extend(supp_papers)
-            counts["PubMed"] = counts.get("PubMed", 0) + len(supp_papers)
-
-    # --- Deduplicate by uid + DOI ---
-    # First-occurrence wins.  A paper is a duplicate if its uid OR its
-    # normalised DOI was already seen.
     seen_uids: set[str] = set()
     seen_dois: set[str] = set()
-    deduped: list[Paper] = []
-    for p in all_papers:
-        key = p.uid
-        doi_key = (p.doi or "").strip().lower()
-        if key in seen_uids:
-            continue
-        if doi_key and doi_key in seen_dois:
-            continue
-        seen_uids.add(key)
-        if doi_key:
-            seen_dois.add(doi_key)
-        deduped.append(p)
+    all_papers: list[Paper] = []
+    counts: dict[str, int] = {}
+    raw_total = 0
+
+    async for label, batch, _dt in iter_pool_sources(
+        query,
+        target_product,
+        pool_size,
+        keywords=keywords,
+        min_year=min_year,
+        max_year=max_year,
+        country=country,
+        enabled_sources=enabled_sources,
+        budget_overrides=budget_overrides,
+    ):
+        raw_total += len(batch)
+        ck = "PubMed" if label == "PubMed_supplementary" else label
+        counts[ck] = counts.get(ck, 0) + len(batch)
+        new_batch = _dedupe_new_batch(batch, seen_uids, seen_dois)
+        all_papers.extend(new_batch)
 
     logger.info(
-        "Pool: {} total ({} deduped) from {} sources: {}",
+        "Pool: {} raw rows ({} deduped) from {} sources: {}",
+        raw_total,
         len(all_papers),
-        len(deduped),
         len([v for v in counts.values() if v > 0]),
         counts,
     )
 
-    return PoolResult(papers=deduped, source_counts=counts)
+    return PoolResult(papers=all_papers, source_counts=counts)

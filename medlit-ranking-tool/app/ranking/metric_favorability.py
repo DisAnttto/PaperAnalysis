@@ -10,10 +10,41 @@ When no structured ``target_metrics`` are supplied but the user has provided
 used: M = (number of user metrics found in the paper) / (total user metrics).
 Matching is case-insensitive and uses token overlap so "posterior capsule
 opacification" matches "PCO" if either string is a substring of the other.
+
+Qualified phrases emitted by NL parsing (e.g. "IOP ~20 mmHg postoperative")
+are stripped of numeric qualifiers and units before matching so they still
+map to canonical extracted names like "intraocular pressure".
 """
+
+import re
 
 from app.models.extraction import ExtractedMetric, MetricValueType
 from app.models.search import DirectionMode, TargetMetric
+
+
+# ---------------------------------------------------------------------------
+# Qualifier / unit stripping — applied to user-supplied metric names before
+# abbreviation expansion and token-overlap matching so that qualified phrases
+# like "IOP ~20 mmHg postoperative" reduce to "IOP postoperative" and then
+# expand correctly to ["IOP", "iop", "intraocular pressure", ...].
+# ---------------------------------------------------------------------------
+
+_METRIC_UNITS_RE = re.compile(
+    r"\b(?:\d+(?:\.\d+)?\s*)?(?:mm\s*hg|mmhg|%|µm|\u00b5m|logmar|letters?|db\b|ml\b|mg\b)\b",
+    re.IGNORECASE,
+)
+_NUMERIC_QUALIFIER_RE = re.compile(r"[~<>≥≤]?\s*\d+(?:\.\d+)?")
+
+
+def _strip_metric_qualifiers(s: str) -> str:
+    """Remove numeric values and clinical units from a metric label.
+
+    Turns "IOP ~20 mmHg postoperative" → "IOP postoperative" so that
+    abbreviation expansion in _metric_query_variants can still fire.
+    """
+    s = _METRIC_UNITS_RE.sub(" ", s)
+    s = _NUMERIC_QUALIFIER_RE.sub(" ", s)
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def _clip(value: float) -> float:
@@ -69,64 +100,77 @@ def _metric_name_matches_core(a: str, b: str) -> bool:
 
 
 def _metric_query_variants(user_name: str) -> list[str]:
-    """Expand user-supplied metric hints with common ophthalmology synonyms."""
+    """Expand user-supplied metric hints with common ophthalmology synonyms.
+
+    Accepts both bare abbreviations ("IOP") and qualified phrases
+    ("IOP ~20 mmHg postoperative") — the qualifier-stripped version is
+    used for abbreviation detection so both forms expand correctly.
+    """
     raw = user_name.strip()
     if not raw:
         return []
     low = raw.lower().replace("‑", "-")
+    # Also check qualifier-stripped version for abbreviation matching
+    low_stripped = _strip_metric_qualifiers(low)
     out: list[str] = [raw]
+
+    def _has(abbr: str) -> bool:
+        """True when the abbreviation appears as a whole word in low or low_stripped."""
+        pat = re.compile(r"\b" + re.escape(abbr) + r"\b", re.IGNORECASE)
+        return bool(pat.search(low) or pat.search(low_stripped))
+
     # Abbreviations ↔ phrases (PMID 39350227 uses CST, BCVA, MV in abstract)
-    if low == "bcva" or "best-corrected visual acuity" in low or "best corrected visual acuity" in low:
+    if _has("bcva") or "best-corrected visual acuity" in low or "best corrected visual acuity" in low:
         out.extend(["BCVA", "bcva", "visual acuity", "best corrected visual acuity"])
-    if low == "cst" or "central subfield thickness" in low:
+    if _has("cst") or "central subfield thickness" in low:
         out.extend(["CST", "cst", "central subfield thickness", "subfield thickness"])
-    if low == "mv" or low == "macular volume":
+    if _has("mv") or "macular volume" in low:
         out.extend(["MV", "mv", "macular volume"])
     # Central foveal / macular thickness (DME papers often use CFT or CMT)
-    if low == "cft" or "central foveal thickness" in low or "foveal thickness" in low:
+    if _has("cft") or "central foveal thickness" in low or "foveal thickness" in low:
         out.extend(
             ["CFT", "cft", "central foveal thickness", "foveal thickness", "central macular thickness"]
         )
-    if low == "cmt" or "central macular thickness" in low:
+    if _has("cmt") or "central macular thickness" in low:
         out.extend(
             ["CMT", "cmt", "central macular thickness", "central retinal thickness", "macular thickness"]
         )
     # IOP (3-letter abbreviation does not token-match intraocular_pressure)
-    if low == "iop" or "intraocular pressure" in low:
+    if _has("iop") or "intraocular pressure" in low:
         out.extend(["IOP", "iop", "intraocular pressure", "intraocular_pressure"])
     # Visual acuity at distance / intermediate / near (IOL outcomes)
-    if low == "udva" or "uncorrected distance visual acuity" in low:
+    if _has("udva") or "uncorrected distance visual acuity" in low:
         out.extend(
             ["UDVA", "udva", "uncorrected distance visual acuity", "uncorrected distance va"]
         )
-    if low == "cdva" or "corrected distance visual acuity" in low:
+    if _has("cdva") or "corrected distance visual acuity" in low:
         out.extend(
             ["CDVA", "cdva", "corrected distance visual acuity", "corrected distance va"]
         )
-    if low == "uiva" or "uncorrected intermediate visual acuity" in low:
+    if _has("uiva") or "uncorrected intermediate visual acuity" in low:
         out.extend(
             ["UIVA", "uiva", "uncorrected intermediate visual acuity", "intermediate visual acuity"]
         )
-    if low == "unva" or "uncorrected near visual acuity" in low:
+    if _has("unva") or "uncorrected near visual acuity" in low:
         out.extend(
             ["UNVA", "unva", "uncorrected near visual acuity", "uncorrected near va", "near visual acuity"]
         )
     # Posterior capsule opacification (PCO is too short for token overlap alone)
-    if low == "pco" or "posterior capsule opacification" in low:
+    if _has("pco") or "posterior capsule opacification" in low:
         out.extend(["PCO", "pco", "posterior capsule opacification", "capsule opacification"])
     # RNFL (glaucoma)
-    if low == "rnfl" or "retinal nerve fiber" in low or "retinal nerve fibre" in low:
+    if _has("rnfl") or "retinal nerve fiber" in low or "retinal nerve fibre" in low:
         out.extend(
             ["RNFL", "rnfl", "retinal nerve fiber layer", "retinal nerve fibre layer", "nerve fiber layer"]
         )
     # Contrast sensitivity (IOL functional outcomes)
-    if low == "cs" or low == "contrast sensitivity" or "contrast sensitivity" in low:
+    if _has("cs") or "contrast sensitivity" in low:
         out.extend(["contrast sensitivity", "CS", "Pelli-Robson"])
     # Spectacle independence (refractive / IOL)
     if "spectacle" in low and "independence" in low:
         out.extend(["spectacle independence", "spectacle free", "glasses independence"])
     # Glaucoma medication burden (Ahmed / XEN trials)
-    if low == "medications" or "medication count" in low or "glaucoma medications" in low:
+    if _has("medications") or "medication count" in low or "glaucoma medications" in low:
         out.extend(
             ["medications", "medication count", "glaucoma medications", "antiglaucoma medications"]
         )
@@ -168,6 +212,10 @@ def _score_coverage_fallback(
     Score = (number of user metrics found in paper) / (total user metrics).
     Each user metric is considered "found" if any extracted metric name
     matches via ``_metric_name_matches``.
+
+    Qualified phrases like "IOP ~20 mmHg postoperative" are stripped of
+    numeric qualifiers and units before matching so they expand correctly to
+    canonical synonyms (e.g. "intraocular pressure").
     """
     found: list[str] = []
     not_found: list[str] = []
@@ -178,7 +226,12 @@ def _score_coverage_fallback(
     ]
 
     for user_m in metrics_of_interest:
-        if any(_metric_name_matches(user_m, ext) for ext in extracted_names):
+        # Try original form first; fall back to qualifier-stripped form
+        canonical = _strip_metric_qualifiers(user_m)
+        if any(
+            _metric_name_matches(user_m, ext) or _metric_name_matches(canonical, ext)
+            for ext in extracted_names
+        ):
             found.append(user_m)
         else:
             not_found.append(user_m)

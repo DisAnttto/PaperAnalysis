@@ -1398,6 +1398,7 @@ function _resetPipeline() {
     poolTotal: 0,
     maxResults: 0,
     poolPapers: [],
+    poolSourceLog: [],
     sourceCounts: {},
     acceptedSet: new Set(),
     acceptedCount: 0,
@@ -1419,13 +1420,20 @@ function _spinnerLine(text) {
 }
 
 function _renderPoolListHTML() {
-  if (!_pipeline || !_pipeline.poolPapers.length) return "";
+  if (!_pipeline || (!_pipeline.poolPapers.length && !(_pipeline.poolSourceLog && _pipeline.poolSourceLog.length))) return "";
   const triaged = ["extracting", "done", "stopped"].includes(_pipeline.phase);
   const n = _pipeline.poolTotal || _pipeline.poolPapers.length;
   const srcCounts = _pipeline.sourceCounts || {};
   const srcParts = Object.entries(srcCounts).filter(([, v]) => v > 0).map(([k, v]) => `${k}: ${v}`);
   const srcSuffix = srcParts.length ? ` (${srcParts.join(", ")})` : "";
-  let html = `<div class="pool-fetch-summary">${_escHtml(`Fetched ${n} result${n !== 1 ? "s" : ""} from all databases${srcSuffix}`)}</div>`;
+  let logHtml = "";
+  if (_pipeline.poolSourceLog && _pipeline.poolSourceLog.length) {
+    logHtml = `<ol class="pool-source-log">` +
+      _pipeline.poolSourceLog.map((line) => `<li>${_escHtml(line)}</li>`).join("") +
+      `</ol>`;
+  }
+  let html = logHtml;
+  html += `<div class="pool-fetch-summary">${_escHtml(`Fetched ${n} result${n !== 1 ? "s" : ""} from all databases${srcSuffix}`)}</div>`;
   html += `<ul class="pool-list${triaged ? " triaged" : ""}" id="pool-list-main">`;
   for (const p of _pipeline.poolPapers) {
     const id = String(p.pmid);
@@ -1505,7 +1513,8 @@ function _renderPipeline() {
     } else if (_pipeline.demoMode && ph === "demo") {
       d1.innerHTML = _spinnerLine(_pipeline.demoStatusMsg || _t("step_demo_pubmed_done"));
     } else if (ph === "searching") {
-      if (!_pipeline.poolPapers.length) {
+      const hasLog = _pipeline.poolSourceLog && _pipeline.poolSourceLog.length;
+      if (!_pipeline.poolPapers.length && !hasLog) {
         d1.innerHTML = _spinnerLine(_t("step_pubmed_active"));
       } else {
         d1.innerHTML = _renderPoolListHTML();
@@ -1862,6 +1871,11 @@ async function runSearch() {
           }
 
           case "pool": {
+            const srcLabel = data.source || data.source_key || "source";
+            const ms = data.duration_ms != null ? ` — ${data.duration_ms} ms` : "";
+            const added = data.paper_count != null ? data.paper_count : (data.papers || []).length;
+            if (!_pipeline.poolSourceLog) _pipeline.poolSourceLog = [];
+            _pipeline.poolSourceLog.push(`${srcLabel}: ${added} new${ms}`);
             for (const p of data.papers || []) {
               if (p && p.pmid) _pipeline.poolPapers.push({ pmid: String(p.pmid), title: p.title || "", source: p.source || "PubMed" });
             }

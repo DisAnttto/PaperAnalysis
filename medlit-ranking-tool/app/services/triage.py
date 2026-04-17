@@ -35,6 +35,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from app.core.config import get_llm_client_config, get_llm_extra_request_kwargs
 from app.models.paper import Paper
 from app.models.search import TargetProductProfile
+from app.ranking.metric_favorability import _metric_query_variants, _strip_metric_qualifiers
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -43,11 +44,14 @@ from app.models.search import TargetProductProfile
 _ABSTRACT_MAX_LEN = 1500
 
 # Literature (PubMed) pre-score weights
+# metric_signal is non-zero only when metrics_of_interest is supplied; the
+# weights are renormalised at runtime so the sum stays 1.0 regardless.
 _PRE_WEIGHTS = {
-    "query_title": 0.25,
-    "query_abstract": 0.20,
-    "profile_signal": 0.40,
-    "mesh_overlap": 0.15,
+    "query_title":    0.22,
+    "query_abstract": 0.18,
+    "profile_signal": 0.30,
+    "mesh_overlap":   0.10,
+    "metric_signal":  0.20,
 }
 
 # Regulatory pre-score weights — renormalised to omit abstract / MeSH,
@@ -102,6 +106,79 @@ _GLAUCOMA_DEVICE_CATEGORIES = frozenset({
 })
 
 _GLAUCOMA_PROCEDURE_PENALTY = 0.15
+
+
+# ---------------------------------------------------------------------------
+# Fast metric signal scanner (O(n) regex, no LLM)
+# Used both for pre-scoring and for the shortlist metric-hit quota.
+# ---------------------------------------------------------------------------
+
+_METRIC_UNIT_RE = re.compile(
+    r"\d{1,4}(?:\.\d+)?\s*(?:mm\s*hg|mmhg|%|µm|\u00b5m|logmar|letters?|db\b|ml\b|mg\b)",
+    re.IGNORECASE,
+)
+
+
+def _metric_signal(
+    paper: Paper,
+    metrics_of_interest: list[str] | None,
+    *,
+    _cache: dict | None = None,
+) -> float:
+    """Quick regex scan: does this paper discuss any user-specified metric?
+
+    Returns a score in [0, 1]:
+      0.0  — metrics_of_interest is empty/None, or no match found
+      >0   — at least one metric name variant appears in title/abstract
+      1.0  — metric name + numeric unit both present and co-located
+
+    Pass a dict as *_cache* to avoid recomputing for the same paper uid.
+    """
+    if not metrics_of_interest:
+        return 0.0
+
+    uid = paper.uid or id(paper)
+    if _cache is not None and uid in _cache:
+        return _cache[uid]
+
+    text = " ".join(filter(None, [paper.title or "", paper.abstract or ""])).lower()
+    if not text.strip():
+        if _cache is not None:
+            _cache[uid] = 0.0
+        return 0.0
+
+    # Collect all variant strings for every user metric
+    all_variants: list[str] = []
+    for user_m in metrics_of_interest:
+        stripped = _strip_metric_qualifiers(user_m)
+        for v in _metric_query_variants(user_m) + (_metric_query_variants(stripped) if stripped != user_m else []):
+            vl = v.lower()
+            if vl not in all_variants:
+                all_variants.append(vl)
+
+    name_hit = any(v in text for v in all_variants)
+    unit_hit = bool(_METRIC_UNIT_RE.search(paper.abstract or ""))
+
+    if not name_hit:
+        score = 0.0
+    elif name_hit and unit_hit:
+        # Bonus if name and unit are within 80 chars of each other
+        co_located = False
+        for v in all_variants:
+            idx = text.find(v)
+            if idx == -1:
+                continue
+            snippet = text[max(0, idx - 80): idx + 80 + len(v)]
+            if _METRIC_UNIT_RE.search(snippet):
+                co_located = True
+                break
+        score = 1.0 if co_located else 0.8
+    else:
+        score = 0.5
+
+    if _cache is not None:
+        _cache[uid] = score
+    return score
 
 
 # ---------------------------------------------------------------------------
@@ -294,24 +371,41 @@ def prescore_paper(
     paper: Paper,
     query: str,
     target_product: TargetProductProfile | None,
+    metrics_of_interest: list[str] | None = None,
+    *,
+    _metric_cache: dict | None = None,
 ) -> float:
     """Deterministic relevance pre-score in [0, 1] for literature (PubMed) papers.
 
     Combines query-token recall over title/abstract, target profile signal
-    strength, and MeSH term overlap.
+    strength, MeSH term overlap, and (when supplied) a fast metric signal
+    that rewards papers discussing user-specified clinical endpoints.
     """
     query_tokens = _tokenize(query)
     title_tokens = _tokenize(paper.title or "")
     abstract_tokens = _tokenize(paper.abstract or "")
 
-    signals = {
-        "query_title": _recall(query_tokens, title_tokens),
+    msig = _metric_signal(paper, metrics_of_interest, _cache=_metric_cache)
+
+    raw_signals = {
+        "query_title":    _recall(query_tokens, title_tokens),
         "query_abstract": _recall(query_tokens, abstract_tokens),
         "profile_signal": _profile_signal(paper, target_product),
-        "mesh_overlap": _mesh_overlap(paper, target_product),
+        "mesh_overlap":   _mesh_overlap(paper, target_product),
+        "metric_signal":  msig,
     }
 
-    score = sum(signals[k] * _PRE_WEIGHTS[k] for k in signals)
+    # When metrics_of_interest is absent, metric_signal is 0 for every paper,
+    # which would silently steal 20 % of the score.  Renormalise weights to
+    # exclude the metric_signal dimension in that case.
+    if not metrics_of_interest:
+        active_keys = [k for k in raw_signals if k != "metric_signal"]
+        total_w = sum(_PRE_WEIGHTS[k] for k in active_keys)
+        signals = {k: raw_signals[k] * (_PRE_WEIGHTS[k] / total_w) for k in active_keys}
+    else:
+        signals = {k: raw_signals[k] * _PRE_WEIGHTS[k] for k in raw_signals}
+
+    score = sum(signals.values())
     score = max(0.0, min(1.0, score))
 
     # Penalise papers primarily about combined glaucoma procedures when the
@@ -429,6 +523,12 @@ Scoring rubric:
   2 — Weak overlap, different population or product.
   0 — Completely irrelevant.
 
+If USER METRICS OF INTEREST are listed in the query block, add weight to
+papers that explicitly report quantitative values for those metrics (numeric
+values with clinical units such as mmHg, %, logMAR, etc.).  A paper that
+matches the device class AND reports a relevant numeric outcome should score
+at least 2 points higher than one that matches only the device class.
+
 Output format:
 - One line per item: ID<tab>SCORE  (use the value shown after ID= on each line, then the score).
 - Include EVERY item. Do not skip any.
@@ -517,10 +617,16 @@ def _build_scoring_prompt(
     papers: list[Paper],
     query: str,
     target_product: TargetProductProfile | None,
+    metrics_of_interest: list[str] | None = None,
 ) -> str:
     lines = [
         f"SEARCH QUERY:\n{query}\n",
         f"TARGET PRODUCT PROFILE:\n{_target_profile_summary(target_product)}\n",
+    ]
+    if metrics_of_interest:
+        metric_lines = "\n".join(f"- {m}" for m in metrics_of_interest)
+        lines.append(f"USER METRICS OF INTEREST:\n{metric_lines}\n")
+    lines += [
         f"Score ALL {len(papers)} papers below on a 0-10 scale.\n",
         "PAPERS:",
     ]
@@ -536,10 +642,16 @@ def _build_regulatory_scoring_prompt(
     papers: list[Paper],
     query: str,
     target_product: TargetProductProfile | None,
+    metrics_of_interest: list[str] | None = None,
 ) -> str:
     lines = [
         f"SEARCH QUERY:\n{query}\n",
         f"TARGET PRODUCT PROFILE:\n{_target_profile_summary(target_product)}\n",
+    ]
+    if metrics_of_interest:
+        metric_lines = "\n".join(f"- {m}" for m in metrics_of_interest)
+        lines.append(f"USER METRICS OF INTEREST:\n{metric_lines}\n")
+    lines += [
         f"Score ALL {len(papers)} regulatory records below on a 0-10 scale.\n",
         "REGULATORY RECORDS:",
     ]
@@ -702,6 +814,7 @@ async def _triage_track(
     top_n: int,
     *,
     regulatory: bool = False,
+    metrics_of_interest: list[str] | None = None,
 ) -> list[str]:
     """Run the 3-phase triage pipeline on one source-homogeneous track.
 
@@ -717,13 +830,16 @@ async def _triage_track(
     if len(valid) <= top_n:
         return [p.uid for p in valid]
 
-    # Phase 1: pre-score
+    # Phase 1: pre-score — compute metric signals once for all papers
+    metric_cache: dict = {}
     pre_scores: dict[str, float] = {}
     for p in valid:
         if regulatory:
             pre_scores[p.uid] = prescore_regulatory(p, query, target_product)
         else:
-            pre_scores[p.uid] = prescore_paper(p, query, target_product)
+            pre_scores[p.uid] = prescore_paper(
+                p, query, target_product, metrics_of_interest, _metric_cache=metric_cache
+            )
 
     # Anchor detection (literature track only)
     anchors: set[str] = set()
@@ -743,6 +859,28 @@ async def _triage_track(
         shortlist_uids.add(p.uid)
         if len(shortlist_uids) >= shortlist_size:
             break
+
+    # Metric-hit quota: guarantee up to min(top_n//2, 10) slots for papers
+    # with strong metric signal that would otherwise fall outside the shortlist.
+    if metrics_of_interest and not regulatory:
+        metric_quota = min(top_n // 2, 10)
+        quota_candidates = sorted(
+            [p for p in valid if p.uid not in shortlist_uids],
+            key=lambda p: metric_cache.get(p.uid, _metric_signal(p, metrics_of_interest)),
+            reverse=True,
+        )
+        added = 0
+        for p in quota_candidates:
+            sig = metric_cache.get(p.uid, 0.0)
+            if sig < 0.35:
+                break
+            shortlist_uids.add(p.uid)
+            added += 1
+            if added >= metric_quota:
+                break
+        if added:
+            logger.info("Metric-hit quota added {} papers to triage shortlist", added)
+
     shortlist_papers = [p for p in valid if p.uid in shortlist_uids]
 
     # Phase 2: LLM scoring on shortlist
@@ -751,7 +889,7 @@ async def _triage_track(
         allowed = {p.uid for p in shortlist_papers}
         system_prompt = _REGULATORY_TRIAGE_SYSTEM if regulatory else _TRIAGE_SYSTEM
         prompt_fn = _build_regulatory_scoring_prompt if regulatory else _build_scoring_prompt
-        prompt = prompt_fn(shortlist_papers, query, target_product)
+        prompt = prompt_fn(shortlist_papers, query, target_product, metrics_of_interest)
         try:
             raw = await _call_scoring_llm(prompt, system=system_prompt)
             llm_scores = _parse_scored_lines(raw, allowed)
@@ -796,6 +934,7 @@ async def _triage_track_stream(
     top_n: int,
     *,
     regulatory: bool = False,
+    metrics_of_interest: list[str] | None = None,
 ) -> list[str]:
     """Same as _triage_track but uses the streaming LLM endpoint internally.
 
@@ -811,13 +950,16 @@ async def _triage_track_stream(
     if len(valid) <= top_n:
         return [p.uid for p in valid]
 
-    # Phase 1: pre-score
+    # Phase 1: pre-score — compute metric signals once for all papers
+    metric_cache: dict = {}
     pre_scores: dict[str, float] = {}
     for p in valid:
         if regulatory:
             pre_scores[p.uid] = prescore_regulatory(p, query, target_product)
         else:
-            pre_scores[p.uid] = prescore_paper(p, query, target_product)
+            pre_scores[p.uid] = prescore_paper(
+                p, query, target_product, metrics_of_interest, _metric_cache=metric_cache
+            )
 
     anchors: set[str] = set()
     if not regulatory:
@@ -833,6 +975,25 @@ async def _triage_track_stream(
         shortlist_uids.add(p.uid)
         if len(shortlist_uids) >= shortlist_size:
             break
+
+    # Metric-hit quota
+    if metrics_of_interest and not regulatory:
+        metric_quota = min(top_n // 2, 10)
+        quota_candidates = sorted(
+            [p for p in valid if p.uid not in shortlist_uids],
+            key=lambda p: metric_cache.get(p.uid, _metric_signal(p, metrics_of_interest)),
+            reverse=True,
+        )
+        added = 0
+        for p in quota_candidates:
+            sig = metric_cache.get(p.uid, 0.0)
+            if sig < 0.35:
+                break
+            shortlist_uids.add(p.uid)
+            added += 1
+            if added >= metric_quota:
+                break
+
     shortlist_papers = [p for p in valid if p.uid in shortlist_uids]
 
     if len(shortlist_papers) <= top_n:
@@ -853,7 +1014,7 @@ async def _triage_track_stream(
     allowed = {p.uid for p in shortlist_papers}
     system_prompt = _REGULATORY_TRIAGE_SYSTEM if regulatory else _TRIAGE_SYSTEM
     prompt_fn = _build_regulatory_scoring_prompt if regulatory else _build_scoring_prompt
-    prompt = prompt_fn(shortlist_papers, query, target_product)
+    prompt = prompt_fn(shortlist_papers, query, target_product, metrics_of_interest)
 
     llm_scores: dict[str, float] = {}
     buf = ""
@@ -919,6 +1080,7 @@ async def triage_papers(
     query: str,
     target_product: TargetProductProfile | None,
     top_n: int,
+    metrics_of_interest: list[str] | None = None,
 ) -> list[str]:
     """Return the top_n most relevant UIDs via split-track hybrid triage.
 
@@ -948,8 +1110,14 @@ async def triage_papers(
         reg_slots,
     )
 
-    lit_uids = await _triage_track(lit_papers, query, target_product, lit_slots) if lit_slots > 0 else []
-    reg_uids = await _triage_track(reg_papers, query, target_product, reg_slots, regulatory=True) if reg_slots > 0 else []
+    lit_uids = (
+        await _triage_track(lit_papers, query, target_product, lit_slots, metrics_of_interest=metrics_of_interest)
+        if lit_slots > 0 else []
+    )
+    reg_uids = (
+        await _triage_track(reg_papers, query, target_product, reg_slots, regulatory=True)
+        if reg_slots > 0 else []
+    )
 
     # Handle underflow: if one track delivers fewer than its allocation,
     # fill surplus from the other (one extra call, capped).
@@ -957,7 +1125,10 @@ async def triage_papers(
     reg_deficit = reg_slots - len(reg_uids)
 
     if reg_deficit > 0 and lit_papers and lit_slots < len(lit_papers):
-        extra = await _triage_track(lit_papers, query, target_product, lit_slots + reg_deficit)
+        extra = await _triage_track(
+            lit_papers, query, target_product, lit_slots + reg_deficit,
+            metrics_of_interest=metrics_of_interest,
+        )
         lit_set = set(lit_uids)
         for uid in extra:
             if uid not in lit_set and len(lit_uids) < lit_slots + reg_deficit:
@@ -996,6 +1167,7 @@ async def triage_papers_stream(
     query: str,
     target_product: TargetProductProfile | None,
     top_n: int,
+    metrics_of_interest: list[str] | None = None,
 ) -> AsyncIterator[str]:
     """Yield shortlisted UIDs in final hybrid-rank order.
 
@@ -1018,7 +1190,10 @@ async def triage_papers_stream(
     lit_slots, reg_slots = _allocate_slots(len(lit_papers), len(reg_papers), top_n)
 
     lit_uids = (
-        await _triage_track_stream(lit_papers, query, target_product, lit_slots)
+        await _triage_track_stream(
+            lit_papers, query, target_product, lit_slots,
+            metrics_of_interest=metrics_of_interest,
+        )
         if lit_slots > 0
         else []
     )
@@ -1033,7 +1208,10 @@ async def triage_papers_stream(
     reg_deficit = reg_slots - len(reg_uids)
 
     if reg_deficit > 0 and lit_papers and lit_slots < len(lit_papers):
-        extra = await _triage_track_stream(lit_papers, query, target_product, lit_slots + reg_deficit)
+        extra = await _triage_track_stream(
+            lit_papers, query, target_product, lit_slots + reg_deficit,
+            metrics_of_interest=metrics_of_interest,
+        )
         lit_set = set(lit_uids)
         for uid in extra:
             if uid not in lit_set and len(lit_uids) < lit_slots + reg_deficit:

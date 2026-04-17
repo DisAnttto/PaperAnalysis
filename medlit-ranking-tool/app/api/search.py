@@ -132,6 +132,7 @@ async def search(request: SearchRequest) -> SearchResponse:
         request.query,
         request.target_product,
         request.max_results,
+        metrics_of_interest=request.metrics_of_interest or None,
     )
     papers = _papers_in_uid_order(papers, shortlisted)
     counts.post_triage = len(papers)
@@ -219,7 +220,11 @@ def _evidence_summary(study) -> str:
 
 async def _stream_search(request: SearchRequest) -> AsyncGenerator[str, None]:
     """Core generator that drives the streaming search pipeline."""
-    from app.services.pool import search_all_sources
+    from app.services.pool import (
+        _dedupe_new_batch,
+        _display_source,
+        iter_pool_sources,
+    )
     from app.services.extraction import extract_paper
     from app.services.triage import triage_papers_stream
     from app.services import db
@@ -236,8 +241,13 @@ async def _stream_search(request: SearchRequest) -> AsyncGenerator[str, None]:
         "intent": routing.intent.value,
     })
 
+    seen_uids: set[str] = set()
+    seen_dois: set[str] = set()
+    papers: list[Paper] = []
+    source_counts: dict[str, int] = {}
+
     try:
-        pool_result = await search_all_sources(
+        async for label, batch, dt_ms in iter_pool_sources(
             request.query,
             request.target_product,
             request.pool_size,
@@ -247,16 +257,37 @@ async def _stream_search(request: SearchRequest) -> AsyncGenerator[str, None]:
             country=request.country,
             enabled_sources=routing.enabled_sources,
             budget_overrides=routing.budget_overrides,
-        )
-        papers = pool_result.papers
+        ):
+            ck = "PubMed" if label == "PubMed_supplementary" else label
+            source_counts[ck] = source_counts.get(ck, 0) + len(batch)
+            new_batch = _dedupe_new_batch(batch, seen_uids, seen_dois)
+            papers.extend(new_batch)
+
+            pool_rows = [
+                {"pmid": p.uid, "title": (p.title or "")[:120], "source": p.source}
+                for p in new_batch
+            ]
+            yield _sse(
+                "pool",
+                {
+                    "source": _display_source(label),
+                    "source_key": label,
+                    "duration_ms": round(dt_ms),
+                    "paper_count": len(new_batch),
+                    "papers": pool_rows,
+                },
+            )
+            await asyncio.sleep(0)
+
     except Exception as exc:
         logger.error("Multi-source search failed: {}", exc)
         yield _sse("error", {"message": f"Search error: {exc}", "fatal": True})
         yield _sse("done", {"total": 0, "results": [], "mode": "live", "run_id": run_id})
         return
 
-    counts.pool_per_source = pool_result.source_counts
-    counts.pool_total = sum(pool_result.source_counts.values())
+    pool_result_source_counts = source_counts
+    counts.pool_per_source = pool_result_source_counts
+    counts.pool_total = sum(pool_result_source_counts.values())
     counts.post_dedup = len(papers)
 
     if not papers:
@@ -275,25 +306,16 @@ async def _stream_search(request: SearchRequest) -> AsyncGenerator[str, None]:
 
     pool_total = len(papers)
 
-    _POOL_BATCH = 25
-    pool_papers = [
-        {"pmid": p.uid, "title": (p.title or "")[:120], "source": p.source}
-        for p in papers
-    ]
-    for i in range(0, len(pool_papers), _POOL_BATCH):
-        yield _sse("pool", {"papers": pool_papers[i : i + _POOL_BATCH]})
-        await asyncio.sleep(0)
-
     yield _sse("status", {
         "message": (
             f"Found {pool_total} result{'s' if pool_total != 1 else ''} "
-            f"from {len([v for v in pool_result.source_counts.values() if v])} databases. "
+            f"from {len([v for v in pool_result_source_counts.values() if v])} databases. "
             f"Selecting top {request.max_results} with AI…"
         ),
         "phase": "triaging",
         "pool_total": pool_total,
         "max_results": request.max_results,
-        "source_counts": pool_result.source_counts,
+        "source_counts": pool_result_source_counts,
     })
 
     by_uid_title = {p.uid: (p.title or "")[:120] for p in papers}
@@ -305,6 +327,7 @@ async def _stream_search(request: SearchRequest) -> AsyncGenerator[str, None]:
             request.query,
             request.target_product,
             request.max_results,
+            metrics_of_interest=request.metrics_of_interest or None,
         ):
             shortlisted.append(uid)
             accept_idx += 1

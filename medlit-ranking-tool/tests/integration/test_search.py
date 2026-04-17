@@ -133,7 +133,7 @@ def test_live_stream_emits_triage_sse_event_names():
     from app.api import search as search_mod
 
     full = inspect.getsource(search_mod._stream_search)
-    assert 'yield _sse("pool"' in full
+    assert '"pool"' in full and "_sse(" in full
     assert '"accept"' in full  # may be wrapped across lines: yield _sse(\n    "accept",
     assert "triage_complete" not in full
     assert "pool_start" not in full

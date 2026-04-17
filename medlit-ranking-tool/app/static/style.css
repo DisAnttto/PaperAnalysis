@@ -1042,6 +1042,19 @@ td.metric-evidence { color: var(--text-muted); font-style: italic; max-width: 22
   gap: 8px;
 }
 
+/* Per-database timing (streaming pool) — shows which source finished and how long */
+.pool-source-log {
+  margin: 0 0 8px 0;
+  padding-left: 1.1em;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.pool-source-log li {
+  margin-bottom: 2px;
+}
+
 .pool-fetch-summary {
   font-size: 11px;
   color: var(--text-muted);
