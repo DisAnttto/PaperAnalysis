@@ -4,27 +4,45 @@ Automated ingestion, extraction, and ranking of medical literature using LLMs an
 
 ## Overview
 
-MedLit Ranking Tool fetches papers from sources like PubMed, extracts structured data, and ranks them by relevance, novelty, and evidence level — giving researchers a prioritised reading list.
+MedLit Ranking Tool fetches papers from PubMed, OpenAlex, openFDA, ClinicalTrials.gov, DailyMed, and AccessGUDID, extracts structured data via LLM, and ranks results by relevance, product similarity, metric favorability, and evidence quality — giving researchers a prioritised reading list for regulatory and clinical evidence work.
 
 ## Project Structure
 
 ```
 medlit-ranking-tool/
 ├─ app/
-│  ├─ api/            # FastAPI routers (health, search, papers)
-│  ├─ core/           # Config, logging, shared utilities
+│  ├─ api/            # FastAPI routers: health, search, papers, admin, qa,
+│  │                  #   retrieval, interpret, report; shared models.py
+│  ├─ clients/        # Async HTTP clients: openFDA, OpenAlex, ClinicalTrials,
+│  │                  #   DailyMed, AccessGUDID, FDA PDF downloads
+│  ├─ core/           # Config (two-tier LLM, NIM, external APIs), logging
 │  ├─ demo/           # Seeded fixtures for demo/QA mode
-│  ├─ models/         # Pydantic data models
-│  ├─ normalization/  # Ophthalmology-specific normalization pipeline
-│  ├─ ranking/        # Deterministic scoring and ranking algorithms
+│  ├─ models/         # Pydantic domain models: paper, search, extraction,
+│  │                  #   normalized, ranking, interpret, run_log, report
+│  ├─ normalization/  # Registry + anatomy, devices, drugs, materials normalizers
+│  ├─ ranking/        # R/P/M/E scoring algorithms + composite ranker
+│  ├─ retrieval/      # Correlated-evidence pipeline: expansion, fusion,
+│  │                  #   graph, scoring, models, enums; demo CLI
+│  ├─ retrieval_bench/# Benchmark harness + targets.json
+│  ├─ services/       # Orchestration: pool, triage, extraction, pubmed,
+│  │                  #   interpret, db, intent_router, post_filters,
+│  │                  #   report_generator, rewrite_generator
 │  ├─ static/         # QA console CSS + JS
 │  ├─ templates/      # Jinja2 HTML templates (QA console)
 │  └─ main.py         # FastAPI app entry point
 ├─ tests/
-│  ├─ integration/    # TestClient end-to-end tests
+│  ├─ clients/        # Unit tests for external API clients
+│  ├─ collection/     # Gold cases JSON, loaders, manifest tests
+│  ├─ integration/    # TestClient end-to-end tests (search, health, papers,
+│  │                  #   demo, retrieval UI; gated gold/live)
 │  ├─ normalization/  # Unit tests for normalization layer
-│  └─ ranking/        # Unit tests for scoring modules
+│  ├─ ranking/        # Unit tests for scoring modules
+│  ├─ retrieval/      # Unit tests for retrieval pipeline
+│  ├─ retrieval_bench/# Slow benchmark tests (@pytest.mark.slow)
+│  └─ services/       # PubMed query builder, extraction coerce tests
 ├─ docs/              # Extended documentation
+├─ scripts/           # dev_server, smoke_nim_llm, check_pmid_rank,
+│                     #   verify_collection_pubmed
 └─ .env.example       # Environment variable reference
 ```
 
@@ -118,9 +136,17 @@ Open `http://localhost:8000/` in your browser.
 |---|---|---|
 | `GET` | `/health` | System status + mode info |
 | `POST` | `/api/v1/search` | Rank papers against `SearchRequest` |
-| `GET` | `/api/v1/papers/{pmid}` | Paper metadata |
-| `POST` | `/api/v1/papers/{pmid}/extract` | Extraction result |
-| `GET` | `/api/v1/papers/{pmid}/detail` | Full detail (paper + extraction + normalized) |
+| `POST` | `/api/v1/search/stream` | SSE streaming search (pool → triage → per-paper results) |
+| `GET` | `/api/v1/papers/{uid}` | Paper metadata |
+| `POST` | `/api/v1/papers/{uid}/extract` | Extraction result |
+| `GET` | `/api/v1/papers/{uid}/detail` | Full detail (paper + extraction + normalized) |
+| `POST` | `/api/v1/admin/set-mode` | Toggle `APP_MODE` in process |
+| `GET` | `/api/v1/qa/gold-cases` | Gold QA cases for form autofill |
+| `POST` | `/api/v1/retrieval/correlate` | Correlated-evidence retrieval from a seed |
+| `GET` | `/api/v1/retrieval/benchmark/{target_id}` | Load a benchmark target |
+| `POST` | `/api/v1/interpret/parse` | Parse a natural-language clinical brief into search fields |
+| `GET` | `/api/v1/report/{run_id}` | Structured PRISMA/Methods report from a completed run |
+| `GET` | `/api/v1/report/{run_id}/markdown` | Same report as Markdown |
 | `GET` | `/docs` | Auto-generated OpenAPI docs |
 
 ## Documentation

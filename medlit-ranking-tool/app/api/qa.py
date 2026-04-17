@@ -13,6 +13,16 @@ router = APIRouter(prefix="/api/v1/qa", tags=["qa"])
 _CASES_PATH = Path(__file__).resolve().parent.parent.parent / "tests" / "collection" / "cases.json"
 
 
+class GoldExpectationsOut(BaseModel):
+    """Validation criteria returned to the frontend for client-side pass/fail checking."""
+
+    golden_pmids: list[str] = Field(default_factory=list)
+    min_composite_by_pmid: dict[str, float] = Field(default_factory=dict)
+    max_rank_by_pmid: dict[str, int] = Field(default_factory=dict)
+    min_m_nonzero_count: int | None = None
+    max_glaucoma_procedure_in_top_n: list[int] | None = None
+
+
 class GoldCaseOut(BaseModel):
     """Subset of a live-search case for the internal UI."""
 
@@ -21,6 +31,7 @@ class GoldCaseOut(BaseModel):
     description: str = ""
     request: dict = Field(default_factory=dict)
     golden_pmids: list[str] = Field(default_factory=list)
+    expectations: GoldExpectationsOut = Field(default_factory=GoldExpectationsOut)
 
 
 @router.get("/gold-cases")
@@ -35,13 +46,28 @@ async def list_gold_cases() -> dict:
         if not isinstance(c, dict) or "id" not in c:
             continue
         exp = c.get("expectations") or {}
+        golden_pmids = list(exp.get("golden_pmids") or [])
+        expectations = GoldExpectationsOut(
+            golden_pmids=golden_pmids,
+            min_composite_by_pmid={
+                str(k): float(v)
+                for k, v in (exp.get("min_composite_by_pmid") or {}).items()
+            },
+            max_rank_by_pmid={
+                str(k): int(v)
+                for k, v in (exp.get("max_rank_by_pmid") or {}).items()
+            },
+            min_m_nonzero_count=exp.get("min_m_nonzero_count"),
+            max_glaucoma_procedure_in_top_n=exp.get("max_glaucoma_procedure_in_top_n"),
+        )
         out.append(
             GoldCaseOut(
                 id=c["id"],
                 name=str(c.get("name") or c["id"]),
                 description=str(c.get("description") or ""),
                 request=c.get("request") or {},
-                golden_pmids=list(exp.get("golden_pmids") or []),
+                golden_pmids=golden_pmids,
+                expectations=expectations,
             )
         )
     return {

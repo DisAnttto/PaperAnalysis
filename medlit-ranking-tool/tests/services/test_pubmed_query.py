@@ -74,6 +74,33 @@ def test_build_pubmed_query_device_category() -> None:
     assert "cataract[Title/Abstract]" in q
 
 
+def test_build_pubmed_query_keywords_or_grouped() -> None:
+    """Multiple text keywords must be ORed, not ANDed, so they expand recall."""
+    tp = TargetProductProfile(
+        target_type="device",
+        device_category="intraocular_lens",
+        indications=["cataract"],
+    )
+    q = build_pubmed_query(
+        "cataract surgery IOP",
+        tp,
+        keywords=["POD1 IOP", "IOP spike", "transient IOP elevation"],
+    )
+    # All three text keywords must appear in a single OR block.
+    # _title_abstract_term wraps multi-word terms in double quotes.
+    assert " OR " in q
+    assert '"POD1 IOP"[Title/Abstract]' in q
+    assert '"IOP spike"[Title/Abstract]' in q
+    assert '"transient IOP elevation"[Title/Abstract]' in q
+    # The OR group should be a single parenthesised clause, not three AND parts.
+    assert "(" in q and ")" in q
+    or_group_start = q.index("(")
+    or_group = q[or_group_start : q.rindex(")") + 1]
+    assert '"POD1 IOP"[Title/Abstract]' in or_group
+    assert '"IOP spike"[Title/Abstract]' in or_group
+    assert '"transient IOP elevation"[Title/Abstract]' in or_group
+
+
 @pytest.mark.skipif(
     not os.environ.get("RUN_LIVE_PUBMED"),
     reason="Set RUN_LIVE_PUBMED=1 to hit NCBI ESearch",

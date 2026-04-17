@@ -283,6 +283,24 @@ class SearchRequest(BaseModel):
     max_year: int | None = Field(default=None, ge=1900, le=2100, description="Latest publication year (inclusive)")
     country: str | None = Field(default=None, max_length=100, description="Filter by author affiliation country")
 
+    # ── Post-retrieval filters (applied after pool, before triage) ───────
+    journal_filter: list[str] = Field(
+        default_factory=list,
+        description="Include only papers from these journals (case-insensitive substring match).",
+    )
+    author_filter: list[str] = Field(
+        default_factory=list,
+        description="Include only papers with at least one matching author (case-insensitive substring).",
+    )
+    include_terms: list[str] = Field(
+        default_factory=list,
+        description="Paper must contain ALL of these terms in title or abstract (case-insensitive).",
+    )
+    exclude_terms: list[str] = Field(
+        default_factory=list,
+        description="Exclude papers containing ANY of these terms in title or abstract (case-insensitive).",
+    )
+
     @model_validator(mode="after")
     def _apply_submission_preset(self) -> "SearchRequest":
         if self.submission_type and self.weights is None:

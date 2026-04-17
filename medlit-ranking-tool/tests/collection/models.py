@@ -22,6 +22,22 @@ class CaseExpectations(BaseModel):
         default_factory=dict,
         description="Maximum 1-based rank allowed for each PMID (inclusive).",
     )
+    min_m_nonzero_count: int | None = Field(
+        default=None,
+        description=(
+            "Minimum number of results whose metric_favorability_score is > 0. "
+            "Use to verify the M dimension is active (metrics_of_interest non-empty)."
+        ),
+    )
+    max_glaucoma_procedure_in_top_n: list[int] | None = Field(
+        default=None,
+        description=(
+            "Two-element list [max_count, top_n]: at most max_count papers in the "
+            "top top_n results may have titles containing combined-glaucoma-procedure "
+            "keywords (trabeculectomy, goniotomy, canaloplasty, etc.). "
+            "Use for cases where the target is not a glaucoma device."
+        ),
+    )
 
 
 class LiveSearchCase(BaseModel):

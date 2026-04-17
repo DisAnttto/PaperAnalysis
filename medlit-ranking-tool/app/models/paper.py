@@ -1,5 +1,6 @@
 """Stored paper metadata returned from ingestion sources."""
 
+import hashlib
 from datetime import date
 
 from pydantic import BaseModel, Field
@@ -32,5 +33,14 @@ class Paper(BaseModel):
 
     @property
     def uid(self) -> str:
-        """Universal identifier: pmid when available, else identifier, else title hash."""
-        return self.pmid or self.identifier or str(hash(self.title))
+        """Universal identifier: pmid when available, else identifier, else title hash.
+
+        The title fallback uses SHA-256 (truncated to 16 hex chars) so the UID
+        is stable across Python processes and restarts.  Python's built-in
+        hash() is randomized per-process (PEP 456) and must not be used here.
+        """
+        if self.pmid:
+            return self.pmid
+        if self.identifier:
+            return self.identifier
+        return hashlib.sha256(self.title.encode()).hexdigest()[:16]

@@ -1,451 +1,495 @@
-"""Unit tests for the outcome interpretation orchestrator (Step 2: core logic)."""
+"""Tests for the two-step NL finding parser (parse_finding_text / /interpret/parse)."""
 
 from __future__ import annotations
 
-import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.models.extraction import ExtractionResult, ExtractedMetric
-from app.models.interpret import (
-    ClaimResult,
-    EvidenceClaim,
-    EvidencePackage,
-    InterpretationAngle,
-    InterpretRequest,
-    InterpretResponse,
-    ObservedFinding,
-)
-from app.models.paper import Paper
-from app.models.ranking import RankedPaperResponse
-from app.services.interpret import (
-    _CLAIM_TEMPLATES,
-    _decompose_claims,
-    _group_into_packages,
-    _mean,
-    _score_claim_relevance,
-    interpret_finding,
-)
+
+def _mock_resp(content: str) -> MagicMock:
+    """Build a minimal chat-completion mock with the given .content."""
+    resp = MagicMock()
+    resp.choices = [MagicMock()]
+    resp.choices[0].message.content = content
+    return resp
 
 
 # ---------------------------------------------------------------------------
-# Helpers / fixtures
+# Reusable Step 1 / Step 2 JSON pairs
 # ---------------------------------------------------------------------------
 
-def _finding(
-    metric: str = "IOP",
-    unit: str = "mmHg",
-    value: float = 20.0,
-    timepoint: str = "POD1",
-    procedure: str = "phacoemulsification",
-    clinical_context: str = "cataract surgery",
-) -> ObservedFinding:
-    return ObservedFinding(
-        metric_name=metric,
-        metric_unit=unit,
-        observed_value=value,
-        timepoint=timepoint,
-        procedure=procedure,
-        clinical_context=clinical_context,
-        p_value=0.03,
-        is_significant=True,
-    )
+_STEP1_IOP = json.dumps({
+    "product_context": {
+        "name": "AcrySof IQ",
+        "name_source": "AcrySof IQ",
+        "type": "device",
+        "manufacturer": "Alcon",
+        "category": "intraocular_lens",
+        "intended_use": "cataract surgery",
+        "indications": ["cataract"],
+        "procedure": "phacoemulsification",
+        "active_ingredient": None,
+        "drug_class": None,
+        "route": None,
+    },
+    "clinical_finding": {
+        "metric": "IOP",
+        "unit": "mmHg",
+        "timepoint": "POD1",
+        "observed": 20,
+        "control": 18,
+        "significant": True,
+    },
+    "search_goals": [
+        "Papers on IOP outcomes after phacoemulsification cataract surgery"
+    ],
+    "seed_identifier": None,
+})
 
+_STEP2_IOP = json.dumps({
+    "metric_name": "IOP", "metric_unit": "mmHg", "timepoint": "POD1",
+    "observed_value": 20, "control_value": 18, "is_significant": True,
+    "clinical_context": "cataract surgery", "procedure": "phacoemulsification",
+    "query": "IOP phacoemulsification cataract surgery outcomes",
+    "seed_identifier": None,
+    "keywords": ["intraocular pressure", "postoperative"],
+    "target_type": "device", "product_name": "AcrySof IQ",
+    "manufacturer": "Alcon",
+    "device_category": "intraocular_lens", "intended_use": "cataract surgery",
+    "indications": ["cataract"], "active_ingredient": None,
+    "drug_class": None, "route": None,
+    "metrics_of_interest": ["IOP", "BCVA"],
+})
 
-def _angle(angle_id: str) -> InterpretationAngle:
-    return InterpretationAngle(
-        angle_id=angle_id,
-        label=angle_id.replace("_", " ").title(),
-        description=f"Test angle: {angle_id}",
-        reasoning="test",
-    )
+_STEP1_DRUG = json.dumps({
+    "product_context": {
+        "name": "VABYSMO", "type": "drug", "manufacturer": None,
+        "category": None, "intended_use": "nAMD",
+        "indications": ["nAMD", "DME"], "procedure": None,
+        "active_ingredient": "faricimab-svoa",
+        "drug_class": "anti_vegf", "route": "intravitreal",
+    },
+    "clinical_finding": {
+        "metric": "BCVA", "unit": "letters", "timepoint": "Month 12",
+        "observed": 15, "control": None, "significant": True,
+    },
+    "search_goals": ["Papers on faricimab BCVA outcomes in nAMD"],
+    "seed_identifier": None,
+})
 
+_STEP2_DRUG = json.dumps({
+    "metric_name": "BCVA", "metric_unit": "letters", "timepoint": "Month 12",
+    "observed_value": 15, "control_value": None, "is_significant": True,
+    "clinical_context": "nAMD treatment", "procedure": None,
+    "query": "faricimab nAMD BCVA outcomes",
+    "target_type": "drug", "product_name": "VABYSMO",
+    "device_category": None, "intended_use": "nAMD",
+    "indications": ["nAMD", "DME"], "active_ingredient": "faricimab-svoa",
+    "drug_class": "anti_vegf", "route": "intravitreal",
+    "metrics_of_interest": ["BCVA", "CST"],
+})
 
-def _paper(pmid: str, title: str = "Test Paper") -> Paper:
-    return Paper(pmid=pmid, source="PubMed", title=title)
+_STEP1_IOL = json.dumps({
+    "product_context": {
+        "name": "intraocular lens",
+        "name_source": "人工晶状体",
+        "type": "device",
+        "manufacturer": "Eyebright Medical",
+        "category": "intraocular_lens",
+        "intended_use": "visual correction for aphakia after cataract surgery",
+        "indications": ["cataract", "aphakia"],
+        "procedure": "phacoemulsification",
+        "active_ingredient": None, "drug_class": None, "route": None,
+    },
+    "clinical_finding": {
+        "metric": "IOP", "unit": "mmHg", "timepoint": "POD1",
+        "observed": 20, "control": 18, "significant": True,
+    },
+    "search_goals": [
+        "Papers reporting transient IOP elevation after cataract surgery that normalises long-term",
+        "Papers where postoperative IOP is around 20 mmHg",
+        "Papers arguing that IOP of 20 mmHg is within safe limits",
+    ],
+    "seed_identifier": None,
+})
 
-
-def _extraction(
-    pmid: str,
-    metric_name: str = "IOP",
-    numeric_value: float | None = 20.0,
-    timepoint: str | None = "POD1",
-) -> ExtractionResult:
-    """Minimal ExtractionResult for testing claim-relevance scoring."""
-    metric = MagicMock(spec=ExtractedMetric)
-    metric.metric_name = metric_name
-    metric.numeric_value = numeric_value
-    metric.timepoint = timepoint
-
-    ext = MagicMock(spec=ExtractionResult)
-    ext.metrics = [metric]
-    return ext
-
-
-def _ranked(pmid: str, composite: float = 0.5, eq: float = 0.6) -> RankedPaperResponse:
-    return RankedPaperResponse(
-        pmid=pmid,
-        title=f"Paper {pmid}",
-        rank=1,
-        composite_score=composite,
-        relevance_score=0.5,
-        product_similarity_score=0.0,
-        metric_favorability_score=0.0,
-        evidence_quality_score=eq,
-        weights_used={"R": 0.4, "P": 0.2, "M": 0.2, "E": 0.2},
-    )
+_STEP2_IOL = json.dumps({
+    "metric_name": "IOP", "metric_unit": "mmHg", "timepoint": "POD1",
+    "observed_value": 20, "control_value": 18, "is_significant": True,
+    "clinical_context": "cataract surgery", "procedure": "phacoemulsification",
+    "query": "intraocular pressure postoperative cataract surgery intraocular lens transient elevation safety",
+    "seed_identifier": None,
+    "keywords": ["IOP", "20 mmHg", "postoperative", "transient", "safe range"],
+    "target_type": "device", "product_name": None,
+    "manufacturer": "Eyebright Medical",
+    "device_category": "intraocular_lens",
+    "intended_use": "visual correction for aphakia after cataract surgery",
+    "indications": ["cataract", "aphakia"],
+    "active_ingredient": None, "drug_class": None, "route": None,
+    "metrics_of_interest": ["IOP", "BCVA"],
+})
 
 
 # ---------------------------------------------------------------------------
-# TestClaimDecomposition
+# TestParseFindingText — service function (two-step chain)
 # ---------------------------------------------------------------------------
 
-class TestClaimDecomposition:
-    """Template-based decomposition for known angle types."""
-
-    def test_known_angle_ids_are_in_templates(self):
-        expected = {
-            "transient_recovery",
-            "value_precedent",
-            "acceptable_range",
-            "statistical_not_clinical",
-            "risk_signal",
-            "mechanism_expected",
-        }
-        assert expected == set(_CLAIM_TEMPLATES.keys())
-
-    @pytest.mark.parametrize("angle_id", list(_CLAIM_TEMPLATES.keys()))
-    def test_template_returns_claims(self, angle_id: str):
-        finding = _finding()
-        angle = _angle(angle_id)
-        fn = _CLAIM_TEMPLATES[angle_id]
-        claims = fn(angle, finding, 0)
-        assert len(claims) >= 1
-        for c in claims:
-            assert c.angle_id == angle_id
-            assert c.search_query
-            assert finding.metric_name in c.search_query
-
-    def test_value_precedent_sets_value_range(self):
-        finding = _finding(value=20.0)
-        claims = _CLAIM_TEMPLATES["value_precedent"](_angle("value_precedent"), finding, 0)
-        assert claims[0].value_range == (18.0, 22.0)
-        assert claims[0].metric_filter == "IOP"
-        assert claims[0].timepoint_filter == "POD1"
-
-    def test_acceptable_range_returns_two_claims(self):
-        claims = _CLAIM_TEMPLATES["acceptable_range"](_angle("acceptable_range"), _finding(), 0)
-        assert len(claims) == 2
-        assert claims[0].claim_id.endswith("_a")
-        assert claims[1].claim_id.endswith("_b")
-
-    def test_transient_recovery_sets_filters(self):
-        finding = _finding()
-        claims = _CLAIM_TEMPLATES["transient_recovery"](_angle("transient_recovery"), finding, 0)
-        assert claims[0].metric_filter == "IOP"
-        assert claims[0].timepoint_filter == "POD1"
-        assert "transient" in claims[0].search_query.lower()
+class TestParseFindingText:
 
     @pytest.mark.asyncio
-    async def test_known_angles_use_no_llm(self):
-        finding = _finding()
-        angles = [_angle(aid) for aid in ["transient_recovery", "value_precedent", "risk_signal"]]
-        # No LLM patch needed — all known angles should produce claims without calling the LLM
-        with patch("app.services.interpret._novel_angle_query") as mock_llm:
-            claims = await _decompose_claims(angles, finding)
-        mock_llm.assert_not_called()
-        assert len(claims) >= 3
+    async def test_parse_returns_structured_fields(self):
+        from app.services.interpret import parse_finding_text
+
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(_STEP1_IOP), _mock_resp(_STEP2_IOP)]
+            )
+            result = await parse_finding_text("术后1天眼压20mmHg vs 18mmHg")
+
+        assert result.metric_name == "IOP"
+        assert result.metric_unit == "mmHg"
+        assert result.observed_value == 20.0
+        assert result.control_value == 18.0
+        assert result.timepoint == "POD1"
+        assert result.is_significant is True
+        assert result.raw_text == "术后1天眼压20mmHg vs 18mmHg"
 
     @pytest.mark.asyncio
-    async def test_novel_angle_triggers_light_model(self):
-        finding = _finding()
-        novel = InterpretationAngle(
-            angle_id="some_novel_angle",
-            label="Novel",
-            description="A novel angle",
-            reasoning="test",
-        )
-        with patch(
-            "app.services.interpret._novel_angle_query",
-            new_callable=AsyncMock,
-            return_value='"IOP" AND "novel"',
-        ) as mock_llm:
-            claims = await _decompose_claims([novel], finding)
-        mock_llm.assert_called_once()
-        assert claims[0].angle_id == "some_novel_angle"
-        assert '"IOP" AND "novel"' == claims[0].search_query
+    async def test_parse_echoes_step1_for_ui(self):
+        """Step 1 product_context / clinical_finding / search_goals are echoed for the UI."""
+        from app.services.interpret import parse_finding_text
 
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(_STEP1_IOP), _mock_resp(_STEP2_IOP)]
+            )
+            result = await parse_finding_text("test")
 
-# ---------------------------------------------------------------------------
-# TestClaimRelevanceScoring
-# ---------------------------------------------------------------------------
-
-class TestClaimRelevanceScoring:
-    def test_all_signals_match(self):
-        claim = EvidenceClaim(
-            claim_id="c1", angle_id="a1", claim_text="t",
-            search_query="q",
-            metric_filter="IOP",
-            value_range=(18.0, 22.0),
-            timepoint_filter="POD1",
-        )
-        paper = _paper("1")
-        ext = _extraction("1", metric_name="IOP", numeric_value=20.0, timepoint="POD1")
-        scores = _score_claim_relevance(claim, [(paper, ext)])
-        assert scores["1"] == pytest.approx(1.0)
-
-    def test_no_signals_set_gives_zero_denominator_default(self):
-        claim = EvidenceClaim(
-            claim_id="c1", angle_id="a1", claim_text="t", search_query="q",
-        )
-        paper = _paper("2")
-        ext = _extraction("2")
-        scores = _score_claim_relevance(claim, [(paper, ext)])
-        assert scores["2"] == pytest.approx(0.0)
-
-    def test_metric_mismatch_scores_zero(self):
-        claim = EvidenceClaim(
-            claim_id="c1", angle_id="a1", claim_text="t", search_query="q",
-            metric_filter="BCVA",
-        )
-        paper = _paper("3")
-        ext = _extraction("3", metric_name="IOP")
-        scores = _score_claim_relevance(claim, [(paper, ext)])
-        assert scores["3"] == pytest.approx(0.0)
-
-    def test_value_out_of_range_scores_partial(self):
-        claim = EvidenceClaim(
-            claim_id="c1", angle_id="a1", claim_text="t", search_query="q",
-            metric_filter="IOP",
-            value_range=(18.0, 22.0),
-        )
-        paper = _paper("4")
-        ext = _extraction("4", metric_name="IOP", numeric_value=30.0)
-        scores = _score_claim_relevance(claim, [(paper, ext)])
-        # metric matched (0.5) but value out of range (0.0) → 0.5 / 2 = 0.5
-        assert scores["4"] == pytest.approx(0.5)
-
-    def test_timepoint_partial_match(self):
-        claim = EvidenceClaim(
-            claim_id="c1", angle_id="a1", claim_text="t", search_query="q",
-            metric_filter="IOP",
-            timepoint_filter="POD1",
-        )
-        paper = _paper("5")
-        # timepoint contains "pod1" substring (case-insensitive)
-        ext = _extraction("5", metric_name="IOP", timepoint="POD1-day-1")
-        scores = _score_claim_relevance(claim, [(paper, ext)])
-        assert scores["5"] == pytest.approx(1.0)
-
-    def test_empty_pairs_returns_empty(self):
-        claim = EvidenceClaim(
-            claim_id="c1", angle_id="a1", claim_text="t", search_query="q",
-            metric_filter="IOP",
-        )
-        assert _score_claim_relevance(claim, []) == {}
-
-
-# ---------------------------------------------------------------------------
-# TestGroupIntoPackages
-# ---------------------------------------------------------------------------
-
-class TestGroupIntoPackages:
-    def _make_claim_result(self, angle_id: str, pmids: list[str]) -> ClaimResult:
-        papers = [_ranked(pmid) for pmid in pmids]
-        scores = {pmid: 0.8 for pmid in pmids}
-        claim = EvidenceClaim(
-            claim_id=f"{angle_id}_0", angle_id=angle_id,
-            claim_text="t", search_query="q",
-        )
-        return ClaimResult(claim=claim, papers=papers, claim_relevance_scores=scores)
-
-    def test_groups_by_angle(self):
-        angles = [_angle("value_precedent"), _angle("acceptable_range")]
-        cr1 = self._make_claim_result("value_precedent", ["1", "2"])
-        cr2 = self._make_claim_result("acceptable_range", ["3"])
-        packages = _group_into_packages(angles, [cr1, cr2])
-        assert len(packages) == 2
-        assert packages[0].angle.angle_id == "value_precedent"
-        assert packages[1].angle.angle_id == "acceptable_range"
-
-    def test_strength_is_mean_relevance(self):
-        angles = [_angle("risk_signal")]
-        cr = self._make_claim_result("risk_signal", ["1", "2"])
-        # all relevance scores are 0.8
-        packages = _group_into_packages(angles, [cr])
-        assert packages[0].strength == pytest.approx(0.8)
-
-    def test_missing_angle_gets_empty_package(self):
-        angles = [_angle("transient_recovery"), _angle("risk_signal")]
-        cr = self._make_claim_result("risk_signal", ["1"])
-        packages = _group_into_packages(angles, [cr])
-        transient_pkg = next(p for p in packages if p.angle.angle_id == "transient_recovery")
-        assert transient_pkg.claims == []
-        assert transient_pkg.strength == pytest.approx(0.0)
-
-    def test_summary_placeholder_is_empty(self):
-        angles = [_angle("value_precedent")]
-        cr = self._make_claim_result("value_precedent", ["1"])
-        packages = _group_into_packages(angles, [cr])
-        assert packages[0].summary == ""
-
-    def test_papers_resorted_by_blended_score(self):
-        angles = [_angle("value_precedent")]
-        # paper "low" has high claim_relevance=1.0 but low composite/eq
-        # paper "high" has claim_relevance=0.0 but high composite/eq
-        low = _ranked("low", composite=0.1, eq=0.1)
-        high = _ranked("high", composite=0.9, eq=0.9)
-        cr = ClaimResult(
-            claim=EvidenceClaim(
-                claim_id="c", angle_id="value_precedent",
-                claim_text="t", search_query="q",
-            ),
-            papers=[high, low],
-            claim_relevance_scores={"low": 1.0, "high": 0.0},
-        )
-        packages = _group_into_packages(angles, [cr])
-        # low: 0.5*1.0 + 0.3*0.1 + 0.2*0.1 = 0.5 + 0.03 + 0.02 = 0.55
-        # high: 0.5*0.0 + 0.3*0.9 + 0.2*0.9 = 0 + 0.27 + 0.18 = 0.45
-        assert packages[0].claims[0].papers[0].pmid == "low"
-
-
-# ---------------------------------------------------------------------------
-# TestMean
-# ---------------------------------------------------------------------------
-
-class TestMean:
-    def test_empty(self):
-        assert _mean([]) == 0.0
-
-    def test_single(self):
-        assert _mean([0.6]) == pytest.approx(0.6)
-
-    def test_multiple(self):
-        assert _mean([0.2, 0.4, 0.6]) == pytest.approx(0.4)
-
-
-# ---------------------------------------------------------------------------
-# TestOrchestrator (end-to-end, all LLM + search mocked)
-# ---------------------------------------------------------------------------
-
-class TestOrchestrator:
-    """End-to-end test with mocked LLM and search pipeline."""
-
-    def _make_request(self) -> InterpretRequest:
-        return InterpretRequest(
-            finding=_finding(),
-            max_results_per_angle=2,
-            pool_size=5,
-        )
-
-    def _make_pool_result(self):
-        from app.services.pool import PoolResult
-        papers = [_paper("1", "IOP after cataract surgery"), _paper("2", "Postop pressure")]
-        return PoolResult(papers=papers, source_counts={"PubMed": 2})
+        assert result.step1_product_context is not None
+        assert result.step1_product_context.get("name_source") == "AcrySof IQ"
+        assert result.step1_clinical_finding is not None
+        assert result.step1_clinical_finding.get("metric") == "IOP"
+        assert result.step1_clinical_finding.get("observed") == 20
+        assert result.step1_search_goals == [
+            "Papers on IOP outcomes after phacoemulsification cataract surgery",
+        ]
 
     @pytest.mark.asyncio
-    async def test_returns_interpret_response(self):
-        from app.services.pool import PoolResult
+    async def test_parse_fills_main_search_fields(self):
+        """Step 2 populates device/drug/query/metrics for sidebar."""
+        from app.services.interpret import parse_finding_text
 
-        pool = PoolResult(papers=[_paper("1")], source_counts={"PubMed": 1})
-        ranked = [_ranked("1")]
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(_STEP1_IOP), _mock_resp(_STEP2_IOP)]
+            )
+            result = await parse_finding_text("AcrySof IQ IOP POD1 20 vs 18 mmHg cataract surgery")
 
-        with (
-            patch("app.services.interpret.search_all_sources", new_callable=AsyncMock, return_value=pool),
-            patch("app.services.interpret.triage_papers", new_callable=AsyncMock, return_value=["1"]),
-            patch("app.services.interpret.extract_paper", new_callable=AsyncMock, return_value=_extraction("1")),
-            patch("app.services.interpret.llm_relevance_raw", new_callable=AsyncMock, return_value=0.5),
-            patch("app.services.interpret.merge_relevance_llm", return_value=(0.5, {})),
-            patch("app.services.interpret.normalize_extraction", return_value=MagicMock()),
-            patch("app.services.interpret.rank_papers", new_callable=AsyncMock, return_value=ranked),
-        ):
-            req = self._make_request()
-            result = await interpret_finding(req)
-
-        assert isinstance(result, InterpretResponse)
-        assert result.finding.metric_name == "IOP"
-        assert len(result.angles) == 3  # placeholder returns 3 angles
-
-    @pytest.mark.asyncio
-    async def test_empty_pool_returns_empty_packages(self):
-        from app.services.pool import PoolResult
-
-        empty_pool = PoolResult(papers=[], source_counts={})
-        with patch("app.services.interpret.search_all_sources", new_callable=AsyncMock, return_value=empty_pool):
-            req = self._make_request()
-            result = await interpret_finding(req)
-
-        assert isinstance(result, InterpretResponse)
-        # Each claim gets empty ClaimResult; 3 angles * their claims = packages, all with 0 papers
-        for pkg in result.angles:
-            for cr in pkg.claims:
-                assert cr.papers == []
+        assert result.query == "IOP phacoemulsification cataract surgery outcomes"
+        assert result.target_type == "device"
+        assert result.product_name == "AcrySof IQ"
+        assert result.manufacturer == "Alcon"
+        assert result.device_category == "intraocular_lens"
+        assert result.intended_use == "cataract surgery"
+        assert result.indications == ["cataract"]
+        assert result.metrics_of_interest == ["IOP", "BCVA"]
+        assert result.active_ingredient is None
+        assert result.route is None
+        assert result.seed_identifier is None
+        assert result.keywords == ["intraocular pressure", "postoperative"]
 
     @pytest.mark.asyncio
-    async def test_claim_search_failure_does_not_crash(self):
-        with patch(
-            "app.services.interpret._run_claim_search",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("API error"),
-        ):
-            # _generate_angles is still the placeholder; _run_claim_search raises
-            req = self._make_request()
-            result = await interpret_finding(req)
+    async def test_parse_drug_fields(self):
+        """Drug context populates active_ingredient, drug_class, route."""
+        from app.services.interpret import parse_finding_text
 
-        assert isinstance(result, InterpretResponse)
-        # All claim results should be empty fallbacks
-        for pkg in result.angles:
-            for cr in pkg.claims:
-                assert cr.papers == []
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(_STEP1_DRUG), _mock_resp(_STEP2_DRUG)]
+            )
+            result = await parse_finding_text("faricimab BCVA gain 15 letters at Month 12, significant")
+
+        assert result.active_ingredient == "faricimab-svoa"
+        assert result.drug_class == "anti_vegf"
+        assert result.route == "intravitreal"
+        assert result.target_type == "drug"
+        assert result.indications == ["nAMD", "DME"]
+
+    @pytest.mark.asyncio
+    async def test_parse_iol_intent_driven(self):
+        """IOL research brief: query captures search intent, not product echo."""
+        from app.services.interpret import parse_finding_text
+
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(_STEP1_IOL), _mock_resp(_STEP2_IOL)]
+            )
+            result = await parse_finding_text(
+                "人工晶状体,-10.0～+36.0 D，以白内障患者为代表人群，"
+                "评价爱博诺德公司生产的人工晶状体安全性和有效性。"
+                "术后1天试验组眼压20mmHg，对照组18mmHg。"
+                "搜集术后短期眼压升高长期恢复正常的文献"
+            )
+
+        assert "transient" in result.query or "elevation" in result.query
+        assert "safety" in result.query or "safe" in result.query
+        assert result.manufacturer == "Eyebright Medical"
+        assert result.device_category == "intraocular_lens"
+        assert result.intended_use is not None
+        assert result.indications is not None
+        assert "cataract" in result.indications
+        assert result.metrics_of_interest is not None
+        assert "IOP" in result.metrics_of_interest
+        assert result.keywords is not None
+        assert len(result.keywords) >= 3
+        assert result.seed_identifier is None
+        assert result.observed_value == 20.0
+        assert result.control_value == 18.0
+        assert result.step1_product_context is not None
+        assert result.step1_product_context.get("name_source") == "人工晶状体"
+        assert result.step1_clinical_finding is not None
+        assert result.step1_clinical_finding.get("metric") == "IOP"
+
+    @pytest.mark.asyncio
+    async def test_two_llm_calls_made(self):
+        """Verify that parse_finding_text makes exactly 2 LLM calls."""
+        from app.services.interpret import parse_finding_text
+
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            mock_create = AsyncMock(
+                side_effect=[_mock_resp(_STEP1_IOP), _mock_resp(_STEP2_IOP)]
+            )
+            instance.chat.completions.create = mock_create
+            await parse_finding_text("IOP 20 mmHg")
+
+        assert mock_create.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_parse_handles_partial_step2(self):
+        """Step 2 with sparse output still maps available fields."""
+        from app.services.interpret import parse_finding_text
+
+        step1_minimal = json.dumps({
+            "product_context": None,
+            "clinical_finding": {"metric": "BCVA", "unit": None,
+                                 "timepoint": None, "observed": 0.5,
+                                 "control": None, "significant": None},
+            "search_goals": [],
+            "seed_identifier": None,
+        })
+        step2_minimal = '{"metric_name":"BCVA","observed_value":0.5}'
+
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(step1_minimal), _mock_resp(step2_minimal)]
+            )
+            result = await parse_finding_text("visual acuity was 0.5")
+
+        assert result.metric_name == "BCVA"
+        assert result.observed_value == 0.5
+        assert result.control_value is None
+        assert result.query is None
+
+    @pytest.mark.asyncio
+    async def test_parse_seed_identifier_and_keywords(self):
+        """Seed and keywords flow through both steps correctly."""
+        from app.services.interpret import parse_finding_text
+
+        step1_seed = json.dumps({
+            "product_context": {
+                "name": "VABYSMO", "type": "drug", "manufacturer": None,
+                "category": None, "intended_use": "nAMD",
+                "indications": ["nAMD"], "procedure": None,
+                "active_ingredient": "faricimab-svoa",
+                "drug_class": "anti_vegf", "route": "intravitreal",
+            },
+            "clinical_finding": None,
+            "search_goals": ["Papers on faricimab nAMD outcomes"],
+            "seed_identifier": "PMID:39350227",
+        })
+        step2_seed = json.dumps({
+            "metric_name": None, "metric_unit": None, "timepoint": None,
+            "observed_value": None, "control_value": None, "is_significant": None,
+            "clinical_context": None, "procedure": None,
+            "query": "faricimab nAMD outcomes",
+            "seed_identifier": "PMID:39350227",
+            "keywords": ["39350227", "nAMD", "anti-VEGF"],
+            "target_type": "drug", "product_name": "VABYSMO",
+            "device_category": None, "intended_use": "nAMD",
+            "indications": ["nAMD"], "active_ingredient": "faricimab-svoa",
+            "drug_class": "anti_vegf", "route": "intravitreal",
+            "metrics_of_interest": ["BCVA", "CST"],
+        })
+
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(step1_seed), _mock_resp(step2_seed)]
+            )
+            result = await parse_finding_text("PMID:39350227 faricimab nAMD")
+
+        assert result.seed_identifier == "PMID:39350227"
+        assert result.keywords == ["39350227", "nAMD", "anti-VEGF"]
+        assert result.query == "faricimab nAMD outcomes"
+
+    @pytest.mark.asyncio
+    async def test_parse_seed_not_hallucinated(self):
+        """seed_identifier stays null when no canonical ID is present."""
+        from app.services.interpret import parse_finding_text
+
+        step1_no_id = json.dumps({
+            "product_context": None,
+            "clinical_finding": {"metric": "IOP", "unit": "mmHg",
+                                 "timepoint": None, "observed": 20,
+                                 "control": None, "significant": None},
+            "search_goals": ["Papers on IOP after cataract surgery"],
+            "seed_identifier": None,
+        })
+        step2_no_id = json.dumps({
+            "metric_name": "IOP", "observed_value": 20,
+            "query": "IOP cataract surgery",
+            "seed_identifier": None, "keywords": None,
+            "target_type": "both", "product_name": None,
+            "device_category": None, "intended_use": None,
+            "indications": None, "active_ingredient": None,
+            "drug_class": None, "route": None,
+            "metrics_of_interest": ["IOP"],
+            "metric_unit": "mmHg", "timepoint": None,
+            "control_value": None, "is_significant": None,
+            "clinical_context": None, "procedure": None,
+        })
+
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(step1_no_id), _mock_resp(step2_no_id)]
+            )
+            result = await parse_finding_text("IOP 20 mmHg cataract surgery")
+
+        assert result.seed_identifier is None
+
+    @pytest.mark.asyncio
+    async def test_step1_failure_returns_empty(self):
+        """If Step 1 fails entirely, return an empty response with raw_text."""
+        from app.services.interpret import parse_finding_text
+
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=RuntimeError("API down")
+            )
+            result = await parse_finding_text("some text")
+
+        assert result.raw_text == "some text"
+        assert result.metric_name is None
+        assert result.observed_value is None
+        assert result.query is None
+
+    @pytest.mark.asyncio
+    async def test_step2_failure_falls_back_to_step1(self):
+        """If Step 2 fails, partial fields from Step 1 are still returned."""
+        from app.services.interpret import parse_finding_text
+
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(side_effect=[
+                _mock_resp(_STEP1_IOL),
+                RuntimeError("Step 2 broke"),
+            ])
+            result = await parse_finding_text("IOL cataract IOP 20 mmHg")
+
+        assert result.raw_text == "IOL cataract IOP 20 mmHg"
+        assert result.manufacturer == "Eyebright Medical"
+        assert result.device_category == "intraocular_lens"
+        assert result.metric_name == "IOP"
+        assert result.observed_value == 20
+        assert result.control_value == 18
+        assert result.query is not None
+
+    @pytest.mark.asyncio
+    async def test_parse_strips_markdown_fences(self):
+        """Fenced LLM output on either step is handled."""
+        from app.services.interpret import parse_finding_text
+
+        fenced_step1 = '```json\n' + _STEP1_IOP + '\n```'
+        fenced_step2 = '```json\n' + _STEP2_IOP + '\n```'
+
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(fenced_step1), _mock_resp(fenced_step2)]
+            )
+            result = await parse_finding_text("IOP 22 mmHg")
+
+        assert result.metric_name == "IOP"
+        assert result.query is not None
 
 
 # ---------------------------------------------------------------------------
-# TestApiEndpoint
+# TestParseEndpoint — REST API
 # ---------------------------------------------------------------------------
 
-class TestApiEndpoint:
-    def test_post_interpret_returns_200(self):
+class TestParseEndpoint:
+    def test_parse_returns_200_with_all_new_fields(self):
         from fastapi.testclient import TestClient
         from app.main import app
-        from app.services.pool import PoolResult
 
-        pool = PoolResult(papers=[_paper("1")], source_counts={"PubMed": 1})
-        ranked = [_ranked("1")]
-
-        with (
-            patch("app.services.interpret.search_all_sources", new_callable=AsyncMock, return_value=pool),
-            patch("app.services.interpret.triage_papers", new_callable=AsyncMock, return_value=["1"]),
-            patch("app.services.interpret.extract_paper", new_callable=AsyncMock, return_value=_extraction("1")),
-            patch("app.services.interpret.llm_relevance_raw", new_callable=AsyncMock, return_value=0.5),
-            patch("app.services.interpret.merge_relevance_llm", return_value=(0.5, {})),
-            patch("app.services.interpret.normalize_extraction", return_value=MagicMock()),
-            patch("app.services.interpret.rank_papers", new_callable=AsyncMock, return_value=ranked),
-        ):
+        with patch("app.services.interpret.AsyncOpenAI") as MockClient:
+            instance = MockClient.return_value
+            instance.chat.completions.create = AsyncMock(
+                side_effect=[_mock_resp(_STEP1_IOP), _mock_resp(_STEP2_IOP)]
+            )
             client = TestClient(app)
-            payload = {
-                "finding": {
-                    "metric_name": "IOP",
-                    "metric_unit": "mmHg",
-                    "observed_value": 20.0,
-                    "timepoint": "POD1",
-                    "procedure": "phacoemulsification",
-                },
-                "max_results_per_angle": 2,
-                "pool_size": 5,
-            }
-            resp = client.post("/api/v1/interpret", json=payload)
+            resp = client.post(
+                "/api/v1/interpret/parse",
+                json={"text": "IOP 20 vs 18 mmHg POD1 cataract surgery significant"},
+            )
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "angles" in data
-        assert "finding" in data
-        assert data["finding"]["metric_name"] == "IOP"
+        assert data["metric_name"] == "IOP"
+        assert data["observed_value"] == 20.0
+        assert data["query"] == "IOP phacoemulsification cataract surgery outcomes"
+        assert data["target_type"] == "device"
+        assert data["seed_identifier"] is None
+        assert data["keywords"] == ["intraocular pressure", "postoperative"]
+        assert data["raw_text"] == "IOP 20 vs 18 mmHg POD1 cataract surgery significant"
+        assert data["step1_clinical_finding"]["metric"] == "IOP"
+        assert data["step1_search_goals"] == [
+            "Papers on IOP outcomes after phacoemulsification cataract surgery",
+        ]
 
-    def test_post_interpret_invalid_payload_returns_422(self):
+    def test_parse_empty_text_returns_422(self):
         from fastapi.testclient import TestClient
         from app.main import app
 
         client = TestClient(app)
-        resp = client.post("/api/v1/interpret", json={"finding": {}})
+        resp = client.post("/api/v1/interpret/parse", json={"text": ""})
         assert resp.status_code == 422
+
+    def test_parse_missing_text_returns_422(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app)
+        resp = client.post("/api/v1/interpret/parse", json={})
+        assert resp.status_code == 422
+
+    def test_old_angle_endpoints_removed(self):
+        """Verify /interpret and /interpret/preview are gone."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app)
+        assert client.post("/api/v1/interpret", json={}).status_code == 404
+        assert client.post("/api/v1/interpret/preview", json={}).status_code == 404
+        assert client.post("/api/v1/interpret/run", json={}).status_code == 404

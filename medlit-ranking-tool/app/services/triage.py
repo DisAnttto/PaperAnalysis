@@ -61,7 +61,7 @@ _REGULATORY_PRE_WEIGHTS = {
 _PRE_SCORE_W = 0.35
 _LLM_SCORE_W = 0.65
 _ANCHOR_FLOOR = 0.5
-_LLM_SHORTLIST_FACTOR = 2
+_LLM_SHORTLIST_FACTOR = 3
 
 _PUBMED_SOURCE = "PubMed"
 
@@ -71,6 +71,37 @@ _REGULATORY_SOURCES = frozenset({"openFDA", "ClinicalTrials", "DailyMed", "Acces
 # Fraction of max_results reserved for regulatory records when both tracks
 # are populated.  The remainder goes to the literature track.
 _REGULATORY_SLOT_FRACTION = 0.30
+
+# ---------------------------------------------------------------------------
+# Glaucoma-procedure pre-score penalty
+# Applied when the search targets a non-glaucoma device (e.g. IOL) and the
+# query does not mention glaucoma.  Papers whose titles contain these terms
+# are primarily about combined glaucoma procedures rather than routine phaco
+# or IOL safety, so they receive a downward pre-score nudge.
+# They are NOT hard-excluded — high relevance can still overcome the penalty.
+# ---------------------------------------------------------------------------
+
+_GLAUCOMA_PROCEDURE_TERMS = frozenset({
+    "trabeculectomy",
+    "trabeculotomy",
+    "goniotomy",
+    "goniosynechialysis",
+    "canaloplasty",
+    "viscocanalostomy",
+    "gatt",
+    "trabectome",
+})
+
+# Device categories that legitimately involve glaucoma procedures — skip penalty.
+_GLAUCOMA_DEVICE_CATEGORIES = frozenset({
+    "glaucoma_drainage_device",
+    "glaucoma_stent",
+    "migs_device",
+    "trabecular_bypass_stent",
+    "ab_interno_trabeculotomy",
+})
+
+_GLAUCOMA_PROCEDURE_PENALTY = 0.15
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +312,18 @@ def prescore_paper(
     }
 
     score = sum(signals[k] * _PRE_WEIGHTS[k] for k in signals)
-    return max(0.0, min(1.0, score))
+    score = max(0.0, min(1.0, score))
+
+    # Penalise papers primarily about combined glaucoma procedures when the
+    # target is not a glaucoma device and the query did not ask about glaucoma.
+    if target_product and "glaucoma" not in query.lower():
+        cat = (target_product.device_category or "").lower()
+        if cat and cat not in _GLAUCOMA_DEVICE_CATEGORIES:
+            title_lower = (paper.title or "").lower()
+            if any(term in title_lower for term in _GLAUCOMA_PROCEDURE_TERMS):
+                score = max(0.0, score - _GLAUCOMA_PROCEDURE_PENALTY)
+
+    return score
 
 
 # ---------------------------------------------------------------------------
@@ -327,29 +369,45 @@ def prescore_regulatory(
 # Anchor detection (literature track only)
 # ---------------------------------------------------------------------------
 
+_MAX_ANCHORS = 10
+
+
 def detect_anchors(
     papers: list[Paper],
     target_product: TargetProductProfile | None,
+    query: str = "",
 ) -> set[str]:
     """Return UIDs of papers whose title contains the target drug/device name.
 
     These papers are guaranteed inclusion regardless of LLM scoring.
+
+    When the product name is generic (e.g. "intraocular lens"), a simple name
+    match produces too many anchors. To prevent anchor flooding we cap the set
+    at ``_MAX_ANCHORS``.  Within that cap we prefer papers whose title also
+    contains a query keyword (3+ chars) — this biases anchors toward topically
+    relevant papers rather than random product-name matches.
     """
     names = _anchor_names(target_product)
     if not names:
         return set()
 
-    anchors: set[str] = set()
+    query_tokens = {
+        t.lower() for t in query.split() if len(t) > 2
+    }
+
+    scored: list[tuple[str, int]] = []
     for p in papers:
         uid = p.uid
         if not uid:
             continue
         title_lower = (p.title or "").lower()
-        for name in names:
-            if name in title_lower:
-                anchors.add(uid)
-                break
-    return anchors
+        if not any(name in title_lower for name in names):
+            continue
+        overlap = sum(1 for tok in query_tokens if tok in title_lower)
+        scored.append((uid, overlap))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return {uid for uid, _ in scored[:_MAX_ANCHORS]}
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +728,7 @@ async def _triage_track(
     # Anchor detection (literature track only)
     anchors: set[str] = set()
     if not regulatory:
-        anchors = detect_anchors(valid, target_product)
+        anchors = detect_anchors(valid, target_product, query=query)
         if anchors:
             logger.info("Triage anchors (literature, guaranteed): {}", anchors)
 
@@ -763,7 +821,7 @@ async def _triage_track_stream(
 
     anchors: set[str] = set()
     if not regulatory:
-        anchors = detect_anchors(valid, target_product)
+        anchors = detect_anchors(valid, target_product, query=query)
 
     shortlist_size = min(
         len(valid),

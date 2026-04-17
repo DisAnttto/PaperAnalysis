@@ -14,12 +14,14 @@ let _sortDir              = "asc";
 let _detailData           = {};    // pmid -> {paper, extraction, normalized, ranked}
 /** PMID string when an inline detail row is open under the results table; null if closed. */
 let _detailOpenPmid       = null;
-let _metricsOfInterest    = [];    // list of metric name strings
+let _metricsOfInterest    = [];    // list of {name: string, value: string} objects
 let _lang                 = "en";  // "en" | "zh"
 let _healthData           = null;  // last /health response
 let _searchAbortController = null; // AbortController for the active stream
-/** @type {Record<string, { id: string, name: string, request: object, golden_pmids?: string[] }>} */
+/** @type {Record<string, { id: string, name: string, request: object, golden_pmids?: string[], expectations?: object }>} */
 let _goldCasesById = {};
+/** ID of the currently active gold case (null when no gold case is selected). */
+let _activeGoldCaseId = null;
 
 // ── i18n ───────────────────────────────────────────────────────────────────
 const _T = {
@@ -90,6 +92,7 @@ const _T = {
   ph_metric_input:    { en: "e.g. BCVA, IOP, injection frequency", zh: "例如 BCVA、IOP、注射频率" },
   btn_add:            { en: "Add",                   zh: "添加" },
   btn_clear_all:      { en: "Clear all",             zh: "清除全部" },
+  metric_value_ph:    { en: "e.g. 20 mmHg",              zh: "如 20 mmHg" },
   metric_count_n:     {
     en: (n) => `${n} metric${n > 1 ? "s" : ""} added`,
     zh: (n) => `已添加 ${n} 项指标`,
@@ -97,6 +100,7 @@ const _T = {
 
   // Filters
   summary_filters:   { en: "Search Filters",          zh: "搜索筛选" },
+  summary_dev_shortcuts: { en: "QA presets & gold cases", zh: "QA 预设与黄金用例" },
   label_num_papers:  { en: "Number of papers",        zh: "论文数量" },
   label_pool_size:   { en: "Pool size (per database)", zh: "每数据库检索池大小" },
   opt_pool_50:       { en: "50 papers",              zh: "50 篇" },
@@ -363,12 +367,49 @@ const _T = {
 
   // Empty state
   empty_state: {
-    en: 'Select a preset or enter a query, then click <strong>Run Search</strong>.',
-    zh: '选择预设或输入查询内容，然后点击<strong>开始搜索</strong>。',
+    en: 'Parse a finding above, fill the search fields, or expand <strong>QA presets &amp; gold cases</strong> — then click <strong>Run Search</strong>.',
+    zh: '在上方解析发现、填写搜索项，或展开<strong>QA 预设与黄金用例</strong>，然后点击<strong>开始搜索</strong>。',
   },
 
   // Error
   err_detail: { en: "Failed to load detail: ", zh: "加载详情失败：" },
+
+  // Natural-language chat box
+  nl_label:               { en: "Describe your finding",             zh: "描述您的临床发现" },
+  nl_placeholder:         { en: "e.g. Postop day 1 IOP was 20 mmHg in the test group vs 18 mmHg in control, statistically significant", zh: "例如：术后1天试验组眼压20mmHg，对照组18mmHg，两组间存在统计学差异" },
+  btn_nl_parse:           { en: "Parse Finding",                     zh: "解析" },
+  nl_parsing:             { en: "Parsing\u2026",                     zh: "解析中\u2026" },
+  nl_done:                { en: "Fields filled",                     zh: "已填充字段" },
+  nl_done_n: {
+    en: (n) => `${n} field${n > 1 ? "s" : ""} filled`,
+    zh: (n) => `已填充 ${n} 个字段`,
+  },
+  nl_nothing:             { en: "Nothing extracted — try adding product name, metric, or PMID", zh: "未提取到字段，请尝试添加产品名称、指标或 PMID" },
+  nl_error:               { en: "Parse failed",                      zh: "解析失败" },
+  nl_timeout:             { en: "Parse timed out (45 s) — try a shorter input", zh: "解析超时（45 秒），请缩短输入" },
+
+  nl_preview_summary:     { en: "Parse breakdown (step 1)",           zh: "解析分解（第一步）" },
+  nl_preview_specs:       { en: "Paper / product specs",             zh: "文献/产品要点" },
+  nl_preview_finding:       { en: "Clinical finding (metric)",         zh: "临床发现（指标）" },
+  nl_preview_intent:        { en: "Search intent (papers to find)",    zh: "检索意图（要找的文献）" },
+  nl_preview_empty:         { en: "—",                                 zh: "—" },
+  nl_prev_name_source:      { en: "Product (as written)",            zh: "产品（原文）" },
+  nl_prev_name:             { en: "Product (English)",               zh: "产品（英文）" },
+  nl_prev_type:             { en: "Type",                            zh: "类型" },
+  nl_prev_manufacturer:     { en: "Manufacturer",                    zh: "生产商" },
+  nl_prev_category:         { en: "Category",                        zh: "类别" },
+  nl_prev_intended_use:     { en: "Intended use",                    zh: "预期用途" },
+  nl_prev_indications:      { en: "Indications",                     zh: "适应症" },
+  nl_prev_procedure:        { en: "Procedure",                     zh: "术式/操作" },
+  nl_prev_active_ingredient:{ en: "Active ingredient",               zh: "活性成分" },
+  nl_prev_drug_class:       { en: "Drug class",                      zh: "药物类别" },
+  nl_prev_route:            { en: "Route",                           zh: "给药途径" },
+  nl_prev_metric:           { en: "Metric",                        zh: "指标" },
+  nl_prev_unit:             { en: "Unit",                          zh: "单位" },
+  nl_prev_timepoint:        { en: "Timepoint",                     zh: "时间点" },
+  nl_prev_observed:         { en: "Test / observed",                 zh: "试验组/观测值" },
+  nl_prev_control:          { en: "Control",                       zh: "对照" },
+  nl_prev_significant:      { en: "Statistically significant",     zh: "统计学差异" },
 };
 
 /** Translate a key, optionally calling with interpolation args if the value is a function. */
@@ -541,6 +582,157 @@ const METRIC_PRESETS = {
   ],
 };
 
+// ── Gold case validation ────────────────────────────────────────────────────
+
+/**
+ * Glaucoma-procedure title terms — mirrors app/services/triage and
+ * tests/collection/checks. Must be kept in sync manually.
+ */
+const _GLAUCOMA_PROCEDURE_TERMS = [
+  "trabeculectomy",
+  "trabeculotomy",
+  "goniotomy",
+  "goniosynechialysis",
+  "canaloplasty",
+  "viscocanalostomy",
+  "gatt",
+  "trabectome",
+];
+
+/**
+ * Run client-side validation of search results against gold expectations.
+ * Returns { passed: bool, checks: [{label, passed, detail}] }.
+ */
+function _runGoldValidation(results, expectations) {
+  const checks = [];
+
+  const pmidToRow = {};
+  for (const r of results) {
+    if (r.pmid != null) pmidToRow[String(r.pmid)] = r;
+  }
+
+  const goldenPmids = expectations.golden_pmids || [];
+  const goldenSet = new Set(goldenPmids);
+
+  // 1. Golden PMID presence
+  for (const pmid of goldenPmids) {
+    const present = pmid in pmidToRow;
+    checks.push({
+      label: `Anchor PMID ${pmid} present in results`,
+      passed: present,
+      detail: present ? `rank ${pmidToRow[pmid].rank}` : "not found",
+    });
+  }
+
+  // 2. Composite score floors
+  const minComposite = expectations.min_composite_by_pmid || {};
+  for (const [pmid, minC] of Object.entries(minComposite)) {
+    if (goldenSet.has(pmid)) continue; // already checked in presence above
+    const row = pmidToRow[pmid];
+    if (!row) {
+      checks.push({ label: `PMID ${pmid} composite ≥ ${minC}`, passed: false, detail: "not in results" });
+    } else {
+      const got = parseFloat(row.composite_score ?? 0);
+      checks.push({
+        label: `PMID ${pmid} composite ≥ ${minC}`,
+        passed: got >= minC,
+        detail: `got ${got.toFixed(3)}`,
+      });
+    }
+  }
+
+  // Composite floors for golden PMIDs (combined check)
+  for (const pmid of goldenPmids) {
+    if (!(pmid in minComposite)) continue;
+    const row = pmidToRow[pmid];
+    if (!row) continue; // already failed presence check
+    const minC = minComposite[pmid];
+    const got = parseFloat(row.composite_score ?? 0);
+    checks.push({
+      label: `PMID ${pmid} composite ≥ ${minC}`,
+      passed: got >= minC,
+      detail: `got ${got.toFixed(3)}`,
+    });
+  }
+
+  // 3. Rank ceilings
+  const maxRank = expectations.max_rank_by_pmid || {};
+  for (const pmid of goldenPmids) {
+    if (!(pmid in maxRank)) continue;
+    const row = pmidToRow[pmid];
+    if (!row) continue; // already failed presence
+    const maxR = maxRank[pmid];
+    const got = row.rank;
+    checks.push({
+      label: `PMID ${pmid} rank ≤ ${maxR}`,
+      passed: got != null && parseInt(got) <= maxR,
+      detail: `got rank ${got}`,
+    });
+  }
+
+  // 4. M-dimension activity
+  if (expectations.min_m_nonzero_count != null) {
+    const minCount = expectations.min_m_nonzero_count;
+    const mActive = results.filter(r => (r.metric_favorability_score || 0) > 0).length;
+    checks.push({
+      label: `M-dimension active in ≥ ${minCount} results`,
+      passed: mActive >= minCount,
+      detail: `${mActive} results have M > 0`,
+    });
+  }
+
+  // 5. Glaucoma-procedure cap
+  if (expectations.max_glaucoma_procedure_in_top_n != null) {
+    const [maxCount, topN] = expectations.max_glaucoma_procedure_in_top_n;
+    const topRows = [...results]
+      .sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999))
+      .slice(0, topN);
+    const hits = topRows.filter(r =>
+      _GLAUCOMA_PROCEDURE_TERMS.some(term => (r.title || "").toLowerCase().includes(term))
+    );
+    checks.push({
+      label: `Glaucoma-procedure papers ≤ ${maxCount} in top ${topN}`,
+      passed: hits.length <= maxCount,
+      detail: hits.length === 0
+        ? "none found"
+        : `${hits.length} found: ${hits.map(r => r.title).join("; ").substring(0, 120)}`,
+    });
+  }
+
+  const allPassed = checks.every(c => c.passed);
+  return { passed: allPassed, checks };
+}
+
+function _hideGoldValidationPanel() {
+  const panel = document.getElementById("gold-validation-panel");
+  if (panel) panel.classList.add("hidden");
+}
+
+function _showGoldValidationPanel(caseName, validation) {
+  const panel = document.getElementById("gold-validation-panel");
+  if (!panel) return;
+
+  const { passed, checks } = validation;
+  const bannerClass = passed ? "gv-pass" : "gv-fail";
+  const bannerText  = passed ? "PASS — all gold expectations met" : "FAIL — some gold expectations not met";
+
+  const checkRows = checks.map(c => `
+    <li class="gv-check ${c.passed ? "gv-check-pass" : "gv-check-fail"}">
+      <span class="gv-icon">${c.passed ? "✓" : "✗"}</span>
+      <span class="gv-check-label">${_escHtml(c.label)}</span>
+      <span class="gv-check-detail">${_escHtml(c.detail || "")}</span>
+    </li>
+  `).join("");
+
+  panel.innerHTML = `
+    <div class="gv-banner ${bannerClass}">
+      <strong>Gold Case:</strong> ${_escHtml(caseName)} &nbsp;—&nbsp; ${bannerText}
+    </div>
+    <ul class="gv-checklist">${checkRows}</ul>
+  `;
+  panel.classList.remove("hidden");
+}
+
 // ── Gold cases (loaded from /api/v1/qa/gold-cases) ───────────────────────────
 function _resetGoldCaseSelect() {
   const sel = document.getElementById("f-gold-case");
@@ -559,7 +751,7 @@ async function loadGoldCasesIntoSelect() {
     while (sel.options.length > 1) sel.remove(1);
     for (const c of data.cases || []) {
       if (!c || !c.id) continue;
-      _goldCasesById[c.id] = c;
+      _goldCasesById[c.id] = c; // includes expectations from backend
       const opt = document.createElement("option");
       opt.value = c.id;
       opt.textContent = c.name || c.id;
@@ -577,9 +769,18 @@ function onGoldCaseSelect() {
   const sel = document.getElementById("f-gold-case");
   if (!sel) return;
   const id = sel.value;
-  if (!id) return;
+  if (!id) {
+    _activeGoldCaseId = null;
+    _hideGoldValidationPanel();
+    return;
+  }
   const c = _goldCasesById[id];
-  if (c && c.request) fillGoldCaseInteractive(c.request);
+  if (!c || !c.request) return;
+  _activeGoldCaseId = id;
+  _hideGoldValidationPanel();
+  // Use fillSearchRequest (not fillGoldCaseInteractive) to replay ALL fields:
+  // query, keywords, target_product, metrics_of_interest, weights, pool_size, max_results.
+  fillSearchRequest(c.request);
 }
 
 /**
@@ -628,7 +829,7 @@ function fillGoldCaseInteractive(req) {
   _setField("f-route", tp.route != null ? String(tp.route) : "");
 
   if (req.metrics_of_interest && req.metrics_of_interest.length) {
-    _setMetrics(req.metrics_of_interest.map(String));
+    _setMetrics(req.metrics_of_interest.map(String));  // string[] → normalised by _setMetrics
     const md = document.getElementById("metrics-details");
     if (md) md.open = true;
   }
@@ -665,7 +866,7 @@ function fillGoldCaseInteractive(req) {
     active_ingredient: tp.active_ingredient || "",
     route:             tp.route || "",
     indications:       Array.isArray(tp.indications) ? tp.indications.join(", ") : (tp.indications || ""),
-    metrics:           req.metrics_of_interest || [],
+    metrics:           req.metrics_of_interest || [],  // always raw strings from request object
   });
 }
 
@@ -861,6 +1062,12 @@ function _setField(id, val) {
 }
 
 // ── Metric chip management ─────────────────────────────────────────────────
+
+/** Return the name strings from the current metric list (for payload / extraction hints). */
+function _metricNames() {
+  return _metricsOfInterest.map(m => m.name);
+}
+
 function addMetricFromInput() {
   const input = document.getElementById("f-metric-input");
   if (!input) return;
@@ -871,15 +1078,24 @@ function addMetricFromInput() {
   input.focus();
 }
 
-function _addMetric(name) {
-  if (!name || _metricsOfInterest.includes(name)) return;
-  _metricsOfInterest.push(name);
+function _addMetric(nameOrObj) {
+  const entry = typeof nameOrObj === "string"
+    ? { name: nameOrObj, value: "" }
+    : { name: nameOrObj.name || "", value: nameOrObj.value || "" };
+  if (!entry.name) return;
+  if (_metricsOfInterest.some(m => m.name === entry.name)) return;
+  _metricsOfInterest.push(entry);
   _renderMetricChips();
 }
 
 function removeMetric(name) {
-  _metricsOfInterest = _metricsOfInterest.filter(m => m !== name);
+  _metricsOfInterest = _metricsOfInterest.filter(m => m.name !== name);
   _renderMetricChips();
+}
+
+function _updateMetricValue(name, val) {
+  const entry = _metricsOfInterest.find(m => m.name === name);
+  if (entry) entry.value = val;
 }
 
 function clearAllMetrics() {
@@ -893,8 +1109,14 @@ function fillMetricPreset(name) {
   _setMetrics(metrics);
 }
 
+/**
+ * Set the full metric list. Accepts string[] or {name, value?}[] — both
+ * are normalised to the internal {name, value} shape.
+ */
 function _setMetrics(list) {
-  _metricsOfInterest = [...list];
+  _metricsOfInterest = list.map(item =>
+    typeof item === "string" ? { name: item, value: "" } : { name: item.name || "", value: item.value || "" }
+  ).filter(e => e.name);
   _renderMetricChips();
 }
 
@@ -903,12 +1125,21 @@ function _renderMetricChips() {
   const countEl   = document.getElementById("metric-count");
   if (!container) return;
 
-  container.innerHTML = _metricsOfInterest.map(m =>
-    `<span class="metric-chip">
-      ${_escHtml(m)}
-      <button class="chip-remove" onclick="removeMetric('${m.replace(/'/g, "\\'")}')" title="${_t("btn_clear")}">×</button>
-    </span>`
-  ).join("");
+  container.innerHTML = _metricsOfInterest.map(m => {
+    const safeName  = m.name.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+    const safeVal   = (m.value || "").replace(/"/g, "&quot;");
+    return `<span class="metric-chip">
+      <span class="metric-chip-label">${_escHtml(m.name)}</span>
+      <button class="chip-remove" onclick="removeMetric('${safeName}')" title="${_t("btn_clear")}">×</button>
+      <input class="metric-chip-input"
+             type="text"
+             placeholder="${_t("metric_value_ph")}"
+             value="${safeVal}"
+             aria-label="${_escHtml(m.name)} target value"
+             oninput="_updateMetricValue('${safeName}', this.value)"
+             onfocus="this.select()" />
+    </span>`;
+  }).join("");
 
   if (countEl) {
     countEl.textContent = _metricsOfInterest.length
@@ -926,12 +1157,17 @@ function clearForm() {
   _setField("f-target-type", "device");
   _setField("f-max-results", "20");
   _resetGoldCaseSelect();
+  _activeGoldCaseId = null;
+  _hideGoldValidationPanel();
   clearAllMetrics();
   // Also clear the evidence-specific fields now in the unified sidebar
   ["ev-seed","ev-product-name","ev-ingredient","ev-route","ev-indication","ev-endpoints"]
     .forEach(id => _setField(id, ""));
   _setField("ev-product-type", "unknown");
   document.getElementById("ev-error")?.classList.add("hidden");
+  _setField("f-nl-input", "");
+  document.getElementById("nl-status")?.classList.add("hidden");
+  clearNlParsePreview();
   _clearEvidenceResults();
 }
 
@@ -1081,9 +1317,30 @@ function _buildSearchPayload() {
   const keyFeatures = csv("f-key-features");
   if (keyFeatures.length) targetProfile.key_features = keyFeatures;
 
-  if (_metricsOfInterest.length) {
-    payload.metrics_of_interest = [..._metricsOfInterest];
+  const metricNames = _metricNames();
+  if (metricNames.length) {
+    payload.metrics_of_interest = metricNames;
   }
+
+  // Build target_metrics for metrics that have a numeric target value
+  const targetMetrics = [];
+  for (const m of _metricsOfInterest) {
+    if (!m.value) continue;
+    // Parse the first number from the value string (handles "20 mmHg", "20.5", etc.)
+    const num = parseFloat(m.value);
+    if (isNaN(num) || num <= 0) continue;
+    targetMetrics.push({
+      metric_name_normalized: m.name.toLowerCase().replace(/\s+/g, "_"),
+      direction: "closer_better",
+      target: num,
+      // Decay range = 50% of target so a paper ±50% away scores 0
+      normalisation_range: Math.max(num * 0.5, 1),
+    });
+  }
+  if (targetMetrics.length) {
+    payload.target_metrics = targetMetrics;
+  }
+
   return payload;
 }
 
@@ -1353,11 +1610,22 @@ function _addOrUpdateResultRow(r) {
   tr.onclick = () => expandRow(r.pmid, r);
   tr.classList.add("result-incoming");
 
+  const _streamGoldenPmids = (() => {
+    if (!_activeGoldCaseId) return new Set();
+    const gc = _goldCasesById[_activeGoldCaseId];
+    return new Set((gc && gc.expectations && gc.expectations.golden_pmids) || []);
+  })();
+  const isGoldenStream = r.pmid && _streamGoldenPmids.has(String(r.pmid));
+  if (isGoldenStream) tr.classList.add("gold-anchor-row");
+  const pmidBadgeStream = isGoldenStream
+    ? `<span class="gold-anchor-badge" title="Gold anchor PMID">gold</span>`
+    : "";
+
   tr.innerHTML = `
     <td class="rank">${r.rank}</td>
     <td>${_escHtml(r.title || "—")}</td>
     <td>${r.published_date ? r.published_date.substring(0,4) : "—"}</td>
-    <td><code>${r.pmid || "—"}</code></td>
+    <td><code>${r.pmid || "—"}</code>${pmidBadgeStream}</td>
     ${_scoreCell(r.composite_score)}
     ${_richScoreCell(r.relevance_score, _relLabel(r.relevance_label))}
     ${_richScoreCell(r.product_similarity_score, r.product_label)}
@@ -1656,6 +1924,14 @@ async function runSearch() {
               modeBadge.className = "chip " + (data.mode === "demo" ? "warn" : "ok");
               document.getElementById("results-count").textContent = _t("count_final", data.total);
               _renderTableBody();
+              // Gold case validation — run after table is rendered
+              if (_activeGoldCaseId) {
+                const gc = _goldCasesById[_activeGoldCaseId];
+                if (gc && gc.expectations) {
+                  const validation = _runGoldValidation(_results, gc.expectations);
+                  _showGoldValidationPanel(gc.name || gc.id, validation);
+                }
+              }
             }
             if (data.mode === "demo") {
               _pipeline.phase = "done";
@@ -1740,16 +2016,30 @@ function _renderTableBody() {
 
   tbody.innerHTML = "";
 
+  // Build set of golden PMIDs for the active gold case (empty set when no gold case active)
+  const _activeGoldenPmids = (() => {
+    if (!_activeGoldCaseId) return new Set();
+    const gc = _goldCasesById[_activeGoldCaseId];
+    return new Set((gc && gc.expectations && gc.expectations.golden_pmids) || []);
+  })();
+
   sorted.forEach(r => {
     const tr = document.createElement("tr");
     tr.dataset.pmid = r.pmid;
     tr.onclick = () => expandRow(r.pmid, r);
 
+    const isGolden = r.pmid && _activeGoldenPmids.has(String(r.pmid));
+    if (isGolden) tr.classList.add("gold-anchor-row");
+
+    const pmidBadge = isGolden
+      ? `<span class="gold-anchor-badge" title="Gold anchor PMID">gold</span>`
+      : "";
+
     tr.innerHTML = `
       <td class="rank">${r.rank}</td>
       <td>${_escHtml(r.title || "—")}</td>
       <td>${r.published_date ? r.published_date.substring(0,4) : "—"}</td>
-      <td><code>${r.pmid || "—"}</code></td>
+      <td><code>${r.pmid || "—"}</code>${pmidBadge}</td>
       ${_scoreCell(r.composite_score)}
       ${_richScoreCell(r.relevance_score, _relLabel(r.relevance_label))}
       ${_richScoreCell(r.product_similarity_score, r.product_label)}
@@ -1863,9 +2153,11 @@ function _moiCell(r) {
       ? _t("moi_cell_coverage_tip", bd.coverage_ratio)
       : "";
 
-  const items = _metricsOfInterest.map(name => {
-    const hit = _moiLookupExtracted(byName, name);
-    const val = hit ? _shortMetricValue(hit) : "";
+  const items = _metricsOfInterest.map(entry => {
+    const name   = entry.name;
+    const target = entry.value ? parseFloat(entry.value) : null;
+    const hit    = _moiLookupExtracted(byName, name);
+    const val    = hit ? _shortMetricValue(hit) : "";
 
     if (useScoring && matchedForM) {
       const countsM = matchedForM.has(name);
@@ -1875,6 +2167,7 @@ function _moiCell(r) {
       let tip = countsM ? _t("moi_pill_m") : _t("moi_not_counts_m");
       if (val) tip += ` — ${val}`;
       else if (hit) tip += ` — ${_t("moi_extracted_no_display_value")}`;
+      if (!isNaN(target) && target) tip += ` (target: ${entry.value})`;
       const titleAttr = ` title="${_attrEscape(tip)}"`;
 
       if (countsM) {
@@ -1884,7 +2177,8 @@ function _moiCell(r) {
     }
 
     if (hit) {
-      return `<span class="moi-item moi-found" title="${_escHtml(name)}">${_escHtml(name)}${val ? `: <strong>${val}</strong>` : ""}</span>`;
+      const targetSuffix = (!isNaN(target) && target) ? ` <span class="moi-target">(target: ${_escHtml(entry.value)})</span>` : "";
+      return `<span class="moi-item moi-found" title="${_escHtml(name)}">${_escHtml(name)}${val ? `: <strong>${val}</strong>` : ""}${targetSuffix}</span>`;
     }
     return `<span class="moi-item moi-missing" title="${_t("moi_not_found")}: ${_escHtml(name)}">${_escHtml(name)}</span>`;
   });
@@ -2648,6 +2942,256 @@ function closeEvidenceDetail() {
   _evDetailOpen = null;
 }
 
+// ── Natural-language finding parser ─────────────────────────────────────────
+
+async function parseNaturalLanguage() {
+  const text = document.getElementById("f-nl-input")?.value?.trim();
+  if (!text) return;
+
+  const btn    = document.getElementById("btn-nl-parse");
+  const status = document.getElementById("nl-status");
+  btn.disabled = true;
+  if (status) { status.textContent = _t("nl_parsing"); status.classList.remove("hidden"); }
+
+  const controller = new AbortController();
+  const timeoutId  = setTimeout(() => controller.abort(), 45_000);
+
+  try {
+    const resp = await fetch("/api/v1/interpret/parse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!resp.ok) {
+      const detail = await resp.json().catch(() => ({}));
+      throw new Error(detail.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    renderNlParsePreview(data);
+    const filled = _fillFromParsed(data);
+    if (status) {
+      status.textContent = filled > 0
+        ? _t("nl_done_n", filled)
+        : _t("nl_nothing");
+    }
+    setTimeout(() => { if (status) status.classList.add("hidden"); }, filled > 0 ? 2500 : 5000);
+  } catch (err) {
+    clearTimeout(timeoutId);
+    clearNlParsePreview();
+    const msg = err.name === "AbortError" ? _t("nl_timeout") : _t("nl_error") + ": " + err.message;
+    if (status) { status.textContent = msg; }
+    setTimeout(() => { if (status) status.classList.add("hidden"); }, 5000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/**
+ * Fill the main search sidebar from a FindingParseResponse.
+ * Maps all parsed fields into the main device/drug/query/metric form controls.
+ */
+/**
+ * Fill the main search sidebar from a FindingParseResponse.
+ * Returns the number of distinct fields/groups that were actually populated.
+ */
+function _fillFromParsed(data) {
+  let filled = 0;
+
+  function _fill(id, val) {
+    if (!val) return;
+    _setField(id, val);
+    filled++;
+  }
+
+  // ── Top trio: Query / Seed / Keywords ──────────────────────────────────
+  _fill("f-query",  data.query);
+  _fill("ev-seed",  data.seed_identifier);
+  if (data.keywords && data.keywords.length) {
+    _setField("f-keywords", data.keywords.join(", "));
+    filled++;
+  }
+
+  // ── Target type select ─────────────────────────────────────────────────
+  if (data.target_type) {
+    const sel = document.getElementById("f-target-type");
+    if (sel) { sel.value = data.target_type; filled++; }
+  }
+
+  // ── Device fields ──────────────────────────────────────────────────────
+  _fill("f-product-name",    data.product_name);
+  _fill("f-manufacturer",    data.manufacturer);
+  _fill("f-device-category", data.device_category);
+  _fill("f-intended-use",    data.intended_use);
+  if (data.indications && data.indications.length) {
+    _setField("f-indications", data.indications.join(", "));
+    filled++;
+  }
+
+  // ── Drug fields ────────────────────────────────────────────────────────
+  _fill("f-active-ingredient", data.active_ingredient);
+  _fill("f-drug-class",        data.drug_class);
+  _fill("f-route",             data.route);
+
+  // ── Metrics of interest — add as chips with values when extractable ──────
+  if (data.metrics_of_interest && data.metrics_of_interest.length) {
+    // Regex: optional qualifier (~, >, >=, ≥, ≤, <, ≈), number, optional unit.
+    // Captures: [1] = number, [2] = unit (mmHg, %, mg/dL, dB, D, letters, etc.)
+    const _METRIC_VAL_RE = /[~≈≥≤><]?\s*(\d+(?:\.\d+)?)\s*(mm\s?[Hh]g|mmhg|%|mg\/[a-zA-Z]+|[mMuU][gG]|dB|letters?|logMAR|D\b)?/i;
+
+    data.metrics_of_interest.forEach(raw => {
+      const phrase = typeof raw === "string" ? raw : (raw.name || "");
+      if (!phrase) return;
+
+      const m = _METRIC_VAL_RE.exec(phrase);
+      if (m && m[1]) {
+        // Split phrase into name (text before number) and value (number + unit)
+        const numStart = m.index;
+        const namePart = phrase.substring(0, numStart).replace(/[~≈≥≤><\s]+$/, "").trim();
+        const unit     = m[2] ? " " + m[2].replace(/\s+/, "") : "";
+        const value    = m[1] + unit;
+        _addMetric({ name: namePart || phrase, value });
+      } else {
+        _addMetric(phrase);
+      }
+    });
+
+    // Part B: if the primary metric chip has no value yet, fill it from
+    // structured observed_value + metric_unit returned by the LLM.
+    if (data.observed_value != null && data.metric_name) {
+      const unit    = data.metric_unit ? " " + data.metric_unit : "";
+      const valStr  = String(data.observed_value) + unit;
+      const nameLow = (data.metric_name || "").toLowerCase();
+      const target  = _metricsOfInterest.find(chip => {
+        const chipLow = chip.name.toLowerCase();
+        return chipLow === nameLow || chipLow.includes(nameLow) || nameLow.includes(chipLow);
+      });
+      if (target && !target.value) {
+        target.value = valStr;
+        _renderMetricChips();
+      }
+    }
+
+    const metricsDetails = document.getElementById("metrics-details");
+    if (metricsDetails) metricsDetails.open = true;
+    filled++;
+  }
+
+  // Only scroll if something was actually filled
+  if (filled > 0) {
+    document.getElementById("f-query")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  return filled;
+}
+
+/** Human-readable label for Step-1 preview dl keys (matches API snake_case). */
+function _nlPreviewLabel(key) {
+  const i18nKey = "nl_prev_" + key;
+  if (_T[i18nKey]) return _t(i18nKey);
+  return key.replace(/_/g, " ");
+}
+
+/** Format a preview value (string, number, bool, array, object). */
+function _nlPreviewValue(val) {
+  if (val === null || val === undefined) return _t("nl_preview_empty");
+  if (typeof val === "boolean") return val ? "true" : "false";
+  if (Array.isArray(val)) return val.length ? val.map(v => _escHtml(String(v))).join(", ") : _t("nl_preview_empty");
+  if (typeof val === "object") return _escHtml(JSON.stringify(val, null, 2));
+  return _escHtml(String(val));
+}
+
+/** Show Step 1 breakdown: paper specs, clinical finding, search intent. */
+function renderNlParsePreview(data) {
+  const root = document.getElementById("nl-parse-preview");
+  const dlSpecs = document.getElementById("nl-preview-specs");
+  const dlFinding = document.getElementById("nl-preview-finding");
+  const olIntent = document.getElementById("nl-preview-intent");
+  if (!root || !dlSpecs || !dlFinding || !olIntent) return;
+
+  const specs = data.step1_product_context;
+  const finding = data.step1_clinical_finding;
+  const goals = data.step1_search_goals;
+
+  const hasSpecs = specs && typeof specs === "object" && Object.keys(specs).length > 0;
+  const hasFinding = finding && typeof finding === "object" && Object.keys(finding).length > 0;
+  const hasGoals = goals && goals.length > 0;
+
+  if (!hasSpecs && !hasFinding && !hasGoals) {
+    root.classList.add("hidden");
+    return;
+  }
+
+  const specOrder = [
+    "name_source", "name", "type", "manufacturer", "category",
+    "intended_use", "indications", "procedure",
+    "active_ingredient", "drug_class", "route",
+  ];
+  dlSpecs.innerHTML = "";
+  if (hasSpecs) {
+    const keys = [...new Set([...specOrder.filter(k => k in specs), ...Object.keys(specs)])];
+    keys.forEach(k => {
+      const dt = document.createElement("dt");
+      dt.textContent = _nlPreviewLabel(k);
+      const dd = document.createElement("dd");
+      dd.innerHTML = _nlPreviewValue(specs[k]);
+      dlSpecs.appendChild(dt);
+      dlSpecs.appendChild(dd);
+    });
+  } else {
+    const dd = document.createElement("dd");
+    dd.className = "nl-parse-empty";
+    dd.textContent = _t("nl_preview_empty");
+    dlSpecs.appendChild(dd);
+  }
+
+  const findOrder = ["metric", "unit", "timepoint", "observed", "control", "significant"];
+  dlFinding.innerHTML = "";
+  if (hasFinding) {
+    const keys = [...new Set([...findOrder.filter(k => k in finding), ...Object.keys(finding)])];
+    keys.forEach(k => {
+      const dt = document.createElement("dt");
+      dt.textContent = _nlPreviewLabel(k);
+      const dd = document.createElement("dd");
+      dd.innerHTML = _nlPreviewValue(finding[k]);
+      dlFinding.appendChild(dt);
+      dlFinding.appendChild(dd);
+    });
+  } else {
+    const dd = document.createElement("dd");
+    dd.className = "nl-parse-empty";
+    dd.textContent = _t("nl_preview_empty");
+    dlFinding.appendChild(dd);
+  }
+
+  olIntent.innerHTML = "";
+  if (hasGoals) {
+    goals.forEach(g => {
+      const li = document.createElement("li");
+      li.innerHTML = _nlPreviewValue(g);
+      olIntent.appendChild(li);
+    });
+  } else {
+    const li = document.createElement("li");
+    li.className = "nl-parse-empty";
+    li.textContent = _t("nl_preview_empty");
+    olIntent.appendChild(li);
+  }
+
+  root.classList.remove("hidden");
+}
+
+function clearNlParsePreview() {
+  document.getElementById("nl-parse-preview")?.classList.add("hidden");
+  const dlSpecs = document.getElementById("nl-preview-specs");
+  const dlFinding = document.getElementById("nl-preview-finding");
+  const olIntent = document.getElementById("nl-preview-intent");
+  if (dlSpecs) dlSpecs.innerHTML = "";
+  if (dlFinding) dlFinding.innerHTML = "";
+  if (olIntent) olIntent.innerHTML = "";
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   fetchHealth();
@@ -2661,6 +3205,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("f-metric-input")?.addEventListener("keydown", e => {
     if (e.key === "Enter") addMetricFromInput();
+  });
+  document.getElementById("f-nl-input")?.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); parseNaturalLanguage(); }
   });
 
   ["w-R","w-P","w-M","w-E"].forEach(id => {

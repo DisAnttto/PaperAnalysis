@@ -27,35 +27,39 @@
 
   <!-- ══════════════════════════ SEARCH PANEL ═══════════════════════════ -->
   <aside id="search-panel">
+
+    <!-- Natural-language finding input -->
+    <div id="nl-chat-box" class="nl-chat-box">
+      <label for="f-nl-input" data-i18n="nl_label">Describe your finding</label>
+      <textarea id="f-nl-input" rows="3"
+        data-i18n-ph="nl_placeholder"
+        placeholder="e.g. 术后1天试验组眼压20mmHg，对照组18mmHg，存在统计学差异"></textarea>
+      <div class="nl-chat-actions">
+        <button id="btn-nl-parse" type="button" onclick="parseNaturalLanguage()" data-i18n="btn_nl_parse">Parse Finding</button>
+        <span id="nl-status" class="nl-status hidden"></span>
+      </div>
+      <div id="nl-parse-preview" class="nl-parse-preview hidden" aria-live="polite">
+        <details id="nl-parse-details" open>
+          <summary data-i18n="nl_preview_summary">Parse breakdown (step 1)</summary>
+          <div class="nl-parse-grid">
+            <section class="nl-parse-section">
+              <h4 class="nl-parse-h" data-i18n="nl_preview_specs">Paper / product specs</h4>
+              <dl id="nl-preview-specs" class="nl-parse-dl"></dl>
+            </section>
+            <section class="nl-parse-section">
+              <h4 class="nl-parse-h" data-i18n="nl_preview_finding">Clinical finding (metric)</h4>
+              <dl id="nl-preview-finding" class="nl-parse-dl"></dl>
+            </section>
+            <section class="nl-parse-section nl-parse-section--wide">
+              <h4 class="nl-parse-h" data-i18n="nl_preview_intent">Search intent (papers to find)</h4>
+              <ol id="nl-preview-intent" class="nl-parse-ol"></ol>
+            </section>
+          </div>
+        </details>
+      </div>
+    </div>
+
     <h2 data-i18n="search_heading">Search</h2>
-
-    <!-- Search presets -->
-    <div class="presets">
-      <span class="label" data-i18n="presets_label">Presets:</span>
-      <button class="preset-btn" onclick="fillPreset('iol_hydrophobic')" data-i18n="preset_iol">Hydrophobic IOL</button>
-      <button class="preset-btn" onclick="fillPreset('faricimab_namd')" data-i18n="preset_faricimab">Faricimab nAMD</button>
-      <button class="preset-btn" onclick="fillPreset('glaucoma_device')" data-i18n="preset_glaucoma">Glaucoma Device</button>
-      <button class="preset-btn" onclick="fillPreset('dexa_dme')" data-i18n="preset_dexa">Dexamethasone DME</button>
-      <button class="preset-btn" onclick="fillPreset('contact_dry_eye')" data-i18n="preset_contact">Contact Lens DED</button>
-    </div>
-
-    <!-- Evidence presets (seed-based) -->
-    <div class="presets">
-      <span class="label" data-i18n="ev_presets_label">Evidence seeds:</span>
-      <button type="button" class="preset-btn" onclick="fillEvidencePreset('faricimab_namd')" data-i18n="ev_preset_faricimab">Faricimab nAMD</button>
-      <button type="button" class="preset-btn" onclick="fillEvidencePreset('ozurdex_dme')" data-i18n="ev_preset_ozurdex">Ozurdex DME</button>
-      <button type="button" class="preset-btn" onclick="fillEvidencePreset('panoptix_iol')" data-i18n="ev_preset_panoptix">PanOptix IOL</button>
-      <button type="button" class="preset-btn" onclick="fillEvidencePreset('idxdr_denovo')" data-i18n="ev_preset_idxdr">IDx-DR De Novo</button>
-      <button type="button" class="preset-btn" onclick="fillEvidencePreset('kardia_510k')" data-i18n="ev_preset_kardia">KardiaMobile 510(k)</button>
-    </div>
-
-    <!-- Gold regression cases (tests/collection/cases.json) -->
-    <div class="field-group">
-      <label for="f-gold-case" data-i18n="label_gold_cases">Gold test cases</label>
-      <select id="f-gold-case" onchange="onGoldCaseSelect()">
-        <option value="" data-i18n="opt_gold_case_none">— Select a gold case —</option>
-      </select>
-    </div>
 
     <!-- Query (PubMed literature search) -->
     <div class="field-group">
@@ -226,6 +230,32 @@
       <button class="secondary" onclick="clearForm()" data-i18n="btn_clear">Clear</button>
     </div>
 
+    <details class="sidebar-dev-shortcuts">
+      <summary data-i18n="summary_dev_shortcuts">QA presets &amp; gold cases</summary>
+      <div class="presets">
+        <span class="label" data-i18n="presets_label">Presets:</span>
+        <button class="preset-btn" onclick="fillPreset('iol_hydrophobic')" data-i18n="preset_iol">Hydrophobic IOL</button>
+        <button class="preset-btn" onclick="fillPreset('faricimab_namd')" data-i18n="preset_faricimab">Faricimab nAMD</button>
+        <button class="preset-btn" onclick="fillPreset('glaucoma_device')" data-i18n="preset_glaucoma">Glaucoma Device</button>
+        <button class="preset-btn" onclick="fillPreset('dexa_dme')" data-i18n="preset_dexa">Dexamethasone DME</button>
+        <button class="preset-btn" onclick="fillPreset('contact_dry_eye')" data-i18n="preset_contact">Contact Lens DED</button>
+      </div>
+      <div class="presets">
+        <span class="label" data-i18n="ev_presets_label">Evidence seeds:</span>
+        <button type="button" class="preset-btn" onclick="fillEvidencePreset('faricimab_namd')" data-i18n="ev_preset_faricimab">Faricimab nAMD</button>
+        <button type="button" class="preset-btn" onclick="fillEvidencePreset('ozurdex_dme')" data-i18n="ev_preset_ozurdex">Ozurdex DME</button>
+        <button type="button" class="preset-btn" onclick="fillEvidencePreset('panoptix_iol')" data-i18n="ev_preset_panoptix">PanOptix IOL</button>
+        <button type="button" class="preset-btn" onclick="fillEvidencePreset('idxdr_denovo')" data-i18n="ev_preset_idxdr">IDx-DR De Novo</button>
+        <button type="button" class="preset-btn" onclick="fillEvidencePreset('kardia_510k')" data-i18n="ev_preset_kardia">KardiaMobile 510(k)</button>
+      </div>
+      <div class="field-group">
+        <label for="f-gold-case" data-i18n="label_gold_cases">Gold test cases</label>
+        <select id="f-gold-case" onchange="onGoldCaseSelect()">
+          <option value="" data-i18n="opt_gold_case_none">— Select a gold case —</option>
+        </select>
+      </div>
+    </details>
+
     <div id="search-error" class="error-msg hidden"></div>
     <div id="ev-error" class="error-msg hidden"></div>
   </aside>
@@ -319,6 +349,9 @@
       </div>
     </section>
 
+    <!-- Gold case validation panel (shown after search when a gold case is active) -->
+    <div id="gold-validation-panel" class="hidden"></div>
+
     <!-- Correlated Evidence progress (shown while /correlate is running) -->
     <section id="ev-progress" class="hidden">
       <div class="ev-spinner">
@@ -367,7 +400,7 @@
 
     <!-- Empty state -->
     <div id="empty-state">
-      <p data-i18n="empty_state">Select a preset or enter a query and/or seed identifier, then click <strong>Run Search</strong>.</p>
+      <p data-i18n="empty_state">Parse a finding above, fill the search fields, or expand QA presets &amp; gold cases — then click <strong>Run Search</strong>.</p>
     </div>
 
   </main>

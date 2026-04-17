@@ -293,6 +293,56 @@
         "min_composite_by_pmid": { "31197608": 0.7 },
         "max_rank_by_pmid": { "31197608": 5 }
       }
+    },
+    {
+      "id": "iol_pod1_iop_safety",
+      "name": "IOL POD1 IOP safety — cataract/phaco postoperative IOP",
+      "description": "Device-mode safety gold case. Reference: baseline_iop_case_run_02.md (run ID 6d100d65). Target is a generic intraocular_lens device; query is a safety-interpretation case about postoperative day-1 IOP elevation after cataract surgery. Anchor PMIDs represent three distinct evidence buckets: (1) direct POD1 IOP data (~18-20 mmHg, PMID 35187424), (2) high-risk subgroups and IOP thresholds (PMID 8784635), (3) IOP spike thresholds and short-term rise/recovery with RCT design (PMID 11159474). Intent must route as SAFETY. Combined glaucoma-procedure papers must not dominate top results.",
+      "request": {
+        "query": "intraocular pressure postoperative day 1 cataract surgery intraocular lens safety IOP elevation",
+        "keywords": [
+          "IOP spike",
+          "postoperative ocular hypertension",
+          "transient IOP elevation",
+          "postoperative intraocular pressure",
+          "IOP after phacoemulsification",
+          "IOP after cataract surgery",
+          "short-term IOP elevation"
+        ],
+        "target_product": {
+          "target_type": "device",
+          "device_category": "intraocular_lens",
+          "intended_use": "correction of aphakia after cataract surgery with extended depth of focus",
+          "indications": ["cataract", "aphakia", "presbyopia"],
+          "anatomical_site": "eye"
+        },
+        "metrics_of_interest": [
+          "IOP",
+          "IOP spike",
+          "intraocular pressure",
+          "postoperative ocular hypertension",
+          "IOP elevation",
+          "IOP lowering"
+        ],
+        "weights": { "R": 0.4, "P": 0.15, "M": 0.25, "E": 0.2 },
+        "pool_size": 100,
+        "max_results": 20
+      },
+      "expectations": {
+        "golden_pmids": ["11159474", "8784635", "35187424"],
+        "min_composite_by_pmid": {
+          "11159474": 0.45,
+          "8784635": 0.45,
+          "35187424": 0.45
+        },
+        "max_rank_by_pmid": {
+          "11159474": 14,
+          "8784635": 14,
+          "35187424": 14
+        },
+        "min_m_nonzero_count": 10,
+        "max_glaucoma_procedure_in_top_n": [3, 10]
+      }
     }
   ]
 }

@@ -442,6 +442,12 @@ td.moi-cell {
 .moi-empty {
   color: var(--text-muted);
 }
+.moi-target {
+  font-size: 0.75em;
+  color: var(--text-muted);
+  font-weight: 400;
+  font-style: italic;
+}
 
 /* ── Inline paper detail (row below result) ───────────────────────────── */
 #results-table tbody tr.detail-row {
@@ -715,23 +721,61 @@ td.moi-cell {
 
 .metric-chips-container {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 5px;
   min-height: 24px;
   margin-bottom: 6px;
+}
+
+.metric-chips-container .metric-chip {
+  width: fit-content;
+  max-width: 100%;
 }
 
 .metric-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 6px 2px 8px;
+  padding: 2px 4px 2px 8px;
   background: #ede9fe;
   color: #5b21b6;
   border: 1px solid #c4b5fd;
   border-radius: 12px;
   font-size: 11px;
   font-weight: 600;
+}
+
+.metric-chip-label {
+  white-space: nowrap;
+}
+
+.metric-chip-input {
+  width: 76px;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-weight: 400;
+  border: 1px solid #c4b5fd;
+  border-radius: 8px;
+  background: #fff;
+  color: #374151;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.metric-chip-input:focus {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.18);
+}
+
+.metric-chip-input::placeholder {
+  color: #a78bfa;
+  font-style: italic;
+}
+
+.metric-chip-input:not(:placeholder-shown) {
+  background: #faf5ff;
+  font-weight: 600;
+  color: #5b21b6;
 }
 
 .chip-remove {
@@ -1439,3 +1483,250 @@ tr.ev-detail-row td {
 
 /* ── Source badge monogram fallback ──────────────────────────────────── */
 .source-badge:empty::before { content: attr(data-source); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Outcome Interpretation
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* -- Sidebar: value pair row (observed / control side-by-side) -- */
+.value-pair-row { display: flex; gap: 8px; }
+.value-pair-row > div { flex: 1; }
+.value-pair-row label { display: block; }
+
+/* -- Sidebar: checkbox label -- */
+.checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.checkbox-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Natural-language chat box
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Collapsed QA shortcuts (search presets, evidence seeds, gold cases) */
+.sidebar-dev-shortcuts {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.sidebar-dev-shortcuts summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+.sidebar-dev-shortcuts[open] summary {
+  margin-bottom: 10px;
+}
+.sidebar-dev-shortcuts .presets:first-of-type {
+  margin-top: 0;
+}
+
+.nl-chat-box {
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+.nl-chat-box label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.nl-chat-box textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 60px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+  font-family: inherit;
+}
+.nl-chat-box textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.nl-chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.nl-chat-actions button {
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.nl-chat-actions button:hover { filter: brightness(1.1); }
+.nl-chat-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.nl-status {
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.nl-parse-preview {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.nl-parse-preview details {
+  font-size: 0.85rem;
+}
+.nl-parse-preview summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  list-style-position: outside;
+}
+.nl-parse-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .nl-parse-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.nl-parse-section--wide {
+  grid-column: 1 / -1;
+}
+.nl-parse-h {
+  margin: 0 0 6px 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+.nl-parse-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(7rem, 38%) 1fr;
+  gap: 4px 8px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.nl-parse-dl dt {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.nl-parse-dl dd {
+  margin: 0;
+  word-break: break-word;
+}
+.nl-parse-ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.nl-parse-ol li {
+  margin-bottom: 6px;
+}
+.nl-parse-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── Gold case validation panel ─────────────────────────────────────────── */
+#gold-validation-panel {
+  margin: 0.75rem 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.gv-banner {
+  padding: 0.6rem 1rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.gv-pass {
+  background: #d4edda;
+  color: #155724;
+  border-bottom: 1px solid #b8dfc4;
+}
+.gv-fail {
+  background: #f8d7da;
+  color: #721c24;
+  border-bottom: 1px solid #f0b8bc;
+}
+.gv-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.75rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gv-check {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.gv-icon {
+  flex-shrink: 0;
+  font-weight: 700;
+  width: 1rem;
+  text-align: center;
+}
+.gv-check-pass .gv-icon { color: #1a7f37; }
+.gv-check-fail .gv-icon { color: #cf222e; }
+.gv-check-label {
+  flex: 1;
+  color: var(--text);
+}
+.gv-check-pass .gv-check-label { color: var(--text); }
+.gv-check-fail .gv-check-label { color: #cf222e; font-weight: 500; }
+.gv-check-detail {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+/* Golden PMID badge in results table */
+.gold-anchor-badge {
+  display: inline-block;
+  background: #b8860b;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-left: 4px;
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+tr.gold-anchor-row td:first-child {
+  border-left: 3px solid #b8860b;
+}

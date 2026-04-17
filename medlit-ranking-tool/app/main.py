@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api import admin, health, interpret, papers, qa, retrieval, search
+from app.api import admin, health, interpret, papers, qa, report, retrieval, search
 from app.core.config import get_llm_client_config, settings
 from app.core.logging import setup_logging
 
@@ -68,6 +68,7 @@ app.include_router(admin.router)
 app.include_router(qa.router)
 app.include_router(retrieval.router)
 app.include_router(interpret.router)
+app.include_router(report.router)
 
 
 # --- QA Console frontend ---

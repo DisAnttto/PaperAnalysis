@@ -358,8 +358,19 @@ def score_product_similarity(
     score = sum(all_signals[k] * normalised_weights[k] for k in all_signals)
     score = max(0.0, min(1.0, score))
 
-    return score, {
+    breakdown: dict = {
         "signals": all_signals,
         "weights": normalised_weights,
         "product_type_activated": target_type,
     }
+
+    # Thin-evidence cap: when only 1-2 sub-signals contributed, the
+    # renormalised score can reach 1.0 based on a single incidental field
+    # match (e.g. device_category alone on a glaucoma-procedure paper that
+    # happens to mention "intraocular lens").  Cap P at 0.5 in that case —
+    # genuine product similarity requires at least 3 overlapping non-null fields.
+    if len(all_active) <= 2 and score > 0.5:
+        score = 0.5
+        breakdown["thin_evidence_cap"] = True
+
+    return score, breakdown

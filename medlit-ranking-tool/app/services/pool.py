@@ -17,11 +17,17 @@ from loguru import logger
 from app.clients.accessgudid import AccessGUDIDClient
 from app.clients.clinicaltrials import ClinicalTrialsClient
 from app.clients.dailymed import DailyMedClient
+from app.clients.openalex import OpenAlexClient
 from app.clients.openfda import OpenFDAClient
 from app.core.config import settings
 from app.models.paper import Paper
 from app.models.search import TargetProductProfile
-from app.services.pubmed import build_pubmed_query, search_pubmed
+from app.services.pubmed import (
+    build_pubmed_query,
+    search_pubmed,
+    search_pmids,
+    fetch_papers,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +159,68 @@ def _gudid_to_paper(result: dict[str, Any]) -> Paper | None:
     )
 
 
+def _openalex_to_paper(work: dict[str, Any]) -> Paper | None:
+    """Convert an OpenAlex work object to a Paper."""
+    title = work.get("title") or ""
+    if not title:
+        return None
+    doi = work.get("doi") or ""
+    if doi.startswith("https://doi.org/"):
+        doi = doi[len("https://doi.org/"):]
+
+    ids = work.get("ids", {})
+    pmid = (ids.get("pmid") or "").replace("https://pubmed.ncbi.nlm.nih.gov/", "").strip("/")
+
+    authorship_list = work.get("authorships", [])
+    authors = []
+    for a in authorship_list[:20]:
+        name = a.get("author", {}).get("display_name", "")
+        if name:
+            authors.append(name)
+
+    abstract_text = None
+    inv_index = work.get("abstract_inverted_index")
+    if inv_index and isinstance(inv_index, dict):
+        positions: list[tuple[int, str]] = []
+        for word, idxs in inv_index.items():
+            for idx in idxs:
+                positions.append((idx, word))
+        positions.sort()
+        abstract_text = " ".join(w for _, w in positions)
+
+    pub_date = None
+    pd_str = work.get("publication_date") or ""
+    if pd_str:
+        try:
+            pub_date = date.fromisoformat(pd_str)
+        except ValueError:
+            pass
+
+    journal_name = None
+    primary_loc = work.get("primary_location", {}) or {}
+    source_info = primary_loc.get("source", {}) or {}
+    journal_name = source_info.get("display_name")
+
+    concepts = work.get("concepts", [])
+    kw = [c.get("display_name", "") for c in concepts[:10] if c.get("display_name")]
+
+    openalex_id = work.get("id", "")
+
+    return Paper(
+        pmid=pmid or None,
+        doi=doi or None,
+        identifier=openalex_id or None,
+        source="OpenAlex",
+        title=title,
+        abstract=abstract_text,
+        authors=authors,
+        journal=journal_name,
+        published_date=pub_date,
+        keywords=kw,
+        source_url=openalex_id or None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Safe coroutine wrapper
 # ---------------------------------------------------------------------------
@@ -194,6 +262,123 @@ class PoolResult:
     source_counts: dict[str, int] = field(default_factory=dict)
 
 
+async def _supplementary_pubmed(
+    query: str,
+    target_product: TargetProductProfile | None,
+    keywords: list[str] | None,
+    max_results: int,
+    min_year: int | None,
+    max_year: int | None,
+    country: str | None,
+    primary_pmids: set[str],
+) -> list[Paper]:
+    """Run complementary PubMed queries to broaden recall.
+
+    The primary PubMed query is built from anchor + indications + keywords, which
+    retrieves device/product-focused papers. But many important clinical papers
+    (e.g. "intraocular pressure after cataract surgery") don't mention the device
+    name. This function fires additional focused queries and returns papers not
+    already found by the primary search.
+    """
+    procedure_terms: list[str] = []
+    if target_product:
+        for ind in target_product.indications:
+            s = ind.strip().replace("_", " ")
+            if s:
+                procedure_terms.append(s)
+
+    if not procedure_terms:
+        return []
+
+    proc_or = " OR ".join(
+        f'"{p}"[Title/Abstract]' if " " in p else f'{p}[Title/Abstract]'
+        for p in procedure_terms[:4]
+    )
+
+    metric_seeds: list[str] = []
+    for kw in keywords or []:
+        low = kw.lower()
+        if any(t in low for t in ("iop", "intraocular pressure", "ocular hypertension",
+                                   "pressure", "bcva", "visual acuity")):
+            metric_seeds.append(kw)
+
+    query_low = query.lower()
+    if "intraocular pressure" in query_low and not any("intraocular pressure" in s.lower() for s in metric_seeds):
+        metric_seeds.insert(0, "intraocular pressure")
+    if "iop" in query_low.split() and not any(s.lower() == "iop" for s in metric_seeds):
+        metric_seeds.insert(0, "IOP")
+
+    extra_queries: list[str] = []
+    for mt in metric_seeds:
+        mt_clean = mt.strip()
+        words = mt_clean.split()
+        if len(words) > 3:
+            mt_clean = " ".join(words[:3])
+        if " " in mt_clean:
+            mt_tag = f'"{mt_clean}"[Title/Abstract]'
+        else:
+            mt_tag = f'{mt_clean}[Title/Abstract]'
+        extra_queries.append(f'{mt_tag} AND ({proc_or})')
+
+    if "postoperative" in query_low:
+        for base in ["intraocular pressure", "IOP"]:
+            eq = f'"{base}"[Title/Abstract] AND postoperative[Title/Abstract]'
+            if eq not in extra_queries:
+                extra_queries.append(eq)
+
+    for kw in keywords or []:
+        low = kw.lower()
+        if any(t in low for t in ("viscoelastic", "pseudoexfoliation", "glaucoma")):
+            if " " in kw:
+                kw_tag = f'"{kw}"[Title/Abstract]'
+            else:
+                kw_tag = f'{kw}[Title/Abstract]'
+            base = '"intraocular pressure"[Title/Abstract]'
+            eq = f'{base} AND {kw_tag}'
+            if eq not in extra_queries:
+                extra_queries.append(eq)
+
+    has_day_terms = any(t in query_low for t in ("day 1", "first day", "postoperative day"))
+    if has_day_terms and proc_or:
+        eq = (
+            '"intraocular pressure"[Title/Abstract] AND '
+            '("day 1"[Title/Abstract] OR "first postoperative"[Title/Abstract] '
+            'OR "early postoperative"[Title/Abstract]) AND '
+            f'({proc_or})'
+        )
+        if eq not in extra_queries:
+            extra_queries.append(eq)
+
+    if not extra_queries:
+        return []
+
+    seen = set(primary_pmids)
+    new_papers: list[Paper] = []
+
+    for eq in extra_queries[:8]:
+        try:
+            pmids = await search_pmids(
+                eq, max_results=max_results,
+                min_year=min_year, max_year=max_year, country=country,
+            )
+            novel = [p for p in pmids if p not in seen][:50]
+            if novel:
+                papers = await fetch_papers(novel)
+                for pp in papers:
+                    if pp.uid and pp.uid not in seen:
+                        pp.source = "PubMed"
+                        new_papers.append(pp)
+                        seen.add(pp.uid)
+                logger.info(
+                    "Supplementary PubMed query {!r} added {} new papers",
+                    eq[:80], len(novel),
+                )
+        except Exception as exc:
+            logger.warning("Supplementary PubMed query failed: {}", exc)
+
+    return new_papers
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -207,12 +392,25 @@ async def search_all_sources(
     min_year: int | None = None,
     max_year: int | None = None,
     country: str | None = None,
+    enabled_sources: frozenset[str] | None = None,
+    budget_overrides: dict[str, int] | None = None,
 ) -> PoolResult:
     """Fan out to every database and return a unified, deduplicated paper pool.
 
-    Each database returns up to *pool_size* results.  The caller is expected
-    to pass the combined pool through triage to trim to ``max_results``.
+    Each database returns up to *pool_size* results (or the budget override).
+    When *enabled_sources* is provided, only those sources are queried.
+    The caller is expected to pass the combined pool through triage to trim
+    to ``max_results``.
     """
+    _enabled = enabled_sources or frozenset({
+        "PubMed", "OpenAlex", "openFDA_device", "openFDA_drug",
+        "ClinicalTrials", "DailyMed", "AccessGUDID",
+    })
+    _budgets = budget_overrides or {}
+
+    def _budget(source_name: str) -> int:
+        return _budgets.get(source_name, pool_size)
+
     free_text = _build_query_term(query, target_product)
 
     # --- Build PubMed query (structured, uses target profile) ---
@@ -223,6 +421,7 @@ async def search_all_sources(
     ct = ClinicalTrialsClient(settings)
     dm = DailyMedClient(settings)
     gudid = AccessGUDIDClient(settings)
+    oalex = OpenAlexClient(settings)
 
     # --- ClinicalTrials query construction ---
     ct_condition = None
@@ -237,29 +436,55 @@ async def search_all_sources(
             or None
         )
 
-    # --- Fan out in parallel ---
+    # --- Fan out in parallel (only enabled sources) ---
+    async def _noop() -> list:
+        return []
+
     tasks = [
-        _safe(search_pubmed(pubmed_term, max_results=pool_size, min_year=min_year, max_year=max_year, country=country), "PubMed"),
-        _safe(openfda.search_device(free_text, limit=pool_size), "openFDA_device"),
-        _safe(openfda.search_drug_label(free_text, limit=pool_size), "openFDA_drug"),
+        _safe(search_pubmed(
+            pubmed_term,
+            max_results=_budget("PubMed"),
+            min_year=min_year,
+            max_year=max_year,
+            country=country,
+            target=target_product,
+            free_text_fallback=free_text,
+        ), "PubMed")
+        if "PubMed" in _enabled else _noop(),
+
+        _safe(oalex.search_works(free_text, limit=_budget("OpenAlex")), "OpenAlex")
+        if "OpenAlex" in _enabled else _noop(),
+
+        _safe(openfda.search_device(free_text, limit=_budget("openFDA_device")), "openFDA_device")
+        if "openFDA_device" in _enabled else _noop(),
+
+        _safe(openfda.search_drug_label(free_text, limit=_budget("openFDA_drug")), "openFDA_drug")
+        if "openFDA_drug" in _enabled else _noop(),
+
         _safe(ct.search_studies(
             query=free_text if not (ct_condition or ct_intervention) else None,
             condition=ct_condition,
             intervention=ct_intervention,
-            limit=pool_size,
-        ), "ClinicalTrials"),
+            limit=_budget("ClinicalTrials"),
+        ), "ClinicalTrials")
+        if "ClinicalTrials" in _enabled else _noop(),
+
         _safe(dm.search_spls(
             target_product.active_ingredient or target_product.product_name or free_text
             if target_product else free_text,
-            limit=pool_size,
-        ), "DailyMed"),
+            limit=_budget("DailyMed"),
+        ), "DailyMed")
+        if "DailyMed" in _enabled else _noop(),
+
         _safe(gudid.search_devices(
             brand_name=target_product.product_name or free_text if target_product else free_text,
-        ), "AccessGUDID"),
+        ), "AccessGUDID")
+        if "AccessGUDID" in _enabled else _noop(),
     ]
 
     (
         pubmed_papers,
+        oalex_works,
         openfda_devices,
         openfda_drugs,
         ct_studies,
@@ -278,6 +503,14 @@ async def search_all_sources(
                 p.identifier = p.pmid
             all_papers.append(p)
     counts["PubMed"] = len([p for p in pubmed_papers if isinstance(p, Paper)])
+
+    n = 0
+    for work in oalex_works:
+        paper = _openalex_to_paper(work)
+        if paper:
+            all_papers.append(paper)
+            n += 1
+    counts["OpenAlex"] = n
 
     n = 0
     for rec in openfda_devices:
@@ -319,14 +552,36 @@ async def search_all_sources(
             n += 1
     counts["AccessGUDID"] = n
 
-    # --- Deduplicate by uid ---
-    seen: set[str] = set()
+    # --- Supplementary PubMed queries for metric-focused recall ---
+    if "PubMed" in _enabled and keywords:
+        primary_pmids = {p.uid for p in all_papers if p.uid}
+        supp_papers = await _supplementary_pubmed(
+            query, target_product, keywords,
+            max_results=_budget("PubMed"),
+            min_year=min_year, max_year=max_year, country=country,
+            primary_pmids=primary_pmids,
+        )
+        if supp_papers:
+            all_papers.extend(supp_papers)
+            counts["PubMed"] = counts.get("PubMed", 0) + len(supp_papers)
+
+    # --- Deduplicate by uid + DOI ---
+    # First-occurrence wins.  A paper is a duplicate if its uid OR its
+    # normalised DOI was already seen.
+    seen_uids: set[str] = set()
+    seen_dois: set[str] = set()
     deduped: list[Paper] = []
     for p in all_papers:
         key = p.uid
-        if key not in seen:
-            seen.add(key)
-            deduped.append(p)
+        doi_key = (p.doi or "").strip().lower()
+        if key in seen_uids:
+            continue
+        if doi_key and doi_key in seen_dois:
+            continue
+        seen_uids.add(key)
+        if doi_key:
+            seen_dois.add(doi_key)
+        deduped.append(p)
 
     logger.info(
         "Pool: {} total ({} deduped) from {} sources: {}",

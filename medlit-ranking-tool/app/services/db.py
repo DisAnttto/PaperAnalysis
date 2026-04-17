@@ -64,6 +64,14 @@ correlation_cache_table = sa.Table(
     sa.UniqueConstraint("seed_id", "candidate_id", name="uq_seed_candidate"),
 )
 
+run_logs_table = sa.Table(
+    "run_logs",
+    metadata,
+    sa.Column("run_id", sa.String, primary_key=True),
+    sa.Column("data_json", sa.Text, nullable=False),
+    sa.Column("created_at", sa.DateTime, nullable=False),
+)
+
 _engine: sa.Engine | None = None
 
 
@@ -299,3 +307,40 @@ def load_correlation(seed_id: str, cand_id: str) -> dict[str, Any] | None:
     if row is None:
         return None
     return json.loads(row[0])
+
+
+# ---------------------------------------------------------------------------
+# Run logs (PRISMA-style retrieval provenance)
+# ---------------------------------------------------------------------------
+
+def save_run_log(run_log: Any) -> None:
+    """Persist a RetrievalRunLog."""
+    ensure_tables()
+    engine = _get_engine()
+    data = run_log.model_dump_json()
+    now = datetime.now(tz=timezone.utc)
+    with engine.begin() as conn:
+        conn.execute(
+            run_logs_table.insert().values(
+                run_id=run_log.run_id,
+                data_json=data,
+                created_at=now,
+            )
+        )
+
+
+def load_run_log(run_id: str) -> Any | None:
+    """Load a RetrievalRunLog by run_id, or None."""
+    from app.models.run_log import RetrievalRunLog
+
+    ensure_tables()
+    engine = _get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.select(run_logs_table.c.data_json).where(
+                run_logs_table.c.run_id == run_id
+            )
+        ).first()
+    if row is None:
+        return None
+    return RetrievalRunLog.model_validate_json(row[0])

@@ -1,11 +1,14 @@
 """Shared response models for the MedLit API."""
 
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 from app.models.extraction import ExtractionResult
 from app.models.normalized import NormalizedProduct
 from app.models.paper import Paper
 from app.models.ranking import RankedPaperResponse
+from app.models.run_log import StageCounts
 
 
 class SearchResponse(BaseModel):
@@ -15,6 +18,8 @@ class SearchResponse(BaseModel):
     total: int
     mode: str      # "demo" or "live"
     query: str
+    run_id: str | None = None
+    stage_counts: StageCounts | None = None
 
 
 class PaperDetailResponse(BaseModel):

@@ -65,9 +65,13 @@ def build_pubmed_query(
     ``device_category``, we combine field-tagged terms with OR inside indication
     groups and AND across groups so the pool is large enough for triage/ranking.
 
-    ``keywords`` (from ``SearchRequest.keywords``) are ANDed as extra Title/Abstract
-    phrases. Pure-digit entries are treated as PubMed UIDs (exact articles), which
-    helps regression tests keep a known PMID in the pool without changing triage.
+    ``keywords`` (from ``SearchRequest.keywords``) are split by type:
+    - Pure-digit entries: treated as PubMed UIDs (ANDed individually), which
+      pins specific PMIDs in the pool for regression tests.
+    - Text entries: grouped into a single OR clause so they act as recall
+      boosters rather than mandatory filters.  Passing several conceptual
+      variants (e.g. "IOP spike", "transient IOP elevation") therefore
+      *expands* the pool instead of collapsing it to zero.
 
     Falls back to the cleaned free-text query when no structured fields apply.
     """
@@ -75,9 +79,10 @@ def build_pubmed_query(
     parts: list[str] = []
 
     if target is not None:
+        # Anchor: prefer drug/product name, fall back to device_category.
         anchor = (target.active_ingredient or target.product_name or "").strip()
-        if anchor:
-            parts.append(_title_abstract_term(anchor))
+        if not anchor and target.device_category:
+            anchor = target.device_category.replace("_", " ").strip()
 
         ind_terms: list[str] = []
         for raw in target.indications:
@@ -90,28 +95,50 @@ def build_pubmed_query(
                 ind_terms.append(
                     _title_abstract_term("neovascular age-related macular degeneration")
                 )
-
         ind_terms = _dedupe_preserve(ind_terms)
-        if ind_terms:
-            if len(ind_terms) == 1:
-                parts.append(ind_terms[0])
-            else:
-                parts.append("(" + " OR ".join(ind_terms) + ")")
 
-        # Optional AND from free-text query (only explicit boosters; keeps pool aligned
-        # with user intent — e.g. "prospective" lifts real-world prospective cohorts.)
+        # Build a context group: anchor OR indications.  This ensures papers
+        # about the condition/procedure are retrieved even when they don't
+        # mention the exact device name in the title/abstract.
+        context_terms: list[str] = []
+        if anchor:
+            context_terms.append(_title_abstract_term(anchor))
+        context_terms.extend(ind_terms)
+        context_terms = _dedupe_preserve(context_terms)
+        if context_terms:
+            if len(context_terms) == 1:
+                parts.append(context_terms[0])
+            else:
+                parts.append("(" + " OR ".join(context_terms) + ")")
+
         low = cleaned.lower()
         if "prospective" in low.replace("-", " "):
             parts.append(_title_abstract_term("prospective"))
 
+    # Keywords: UIDs are mandatory (AND), text variants are ORed together so
+    # they expand recall instead of producing an impossible intersection.
+    # Phrases longer than 3 words are poor PubMed phrase queries (too literal),
+    # so we keep only the first 3 content words for Title/Abstract matching.
+    uid_parts: list[str] = []
+    text_kw: list[str] = []
     for raw in keywords or []:
         s = raw.strip()
         if not s:
             continue
         if s.isdigit():
-            parts.append(f"{s}[UID]")
+            uid_parts.append(f"{s}[UID]")
         else:
-            parts.append(_title_abstract_term(s))
+            words = s.split()
+            if len(words) > 3:
+                s = " ".join(words[:3])
+            text_kw.append(_title_abstract_term(s))
+
+    parts.extend(uid_parts)
+    if text_kw:
+        if len(text_kw) == 1:
+            parts.append(text_kw[0])
+        else:
+            parts.append("(" + " OR ".join(text_kw) + ")")
 
     if parts:
         combined = " AND ".join(parts)
@@ -127,6 +154,46 @@ def build_pubmed_query(
         return cleaned
 
     return query.strip() or ""
+
+
+def build_pubmed_query_simplified(
+    query: str,
+    target: TargetProductProfile | None = None,
+) -> str:
+    """Build a minimal PubMed query using only anchor + indications (no keywords).
+
+    Used as a fallback when the full structured query (which includes keywords)
+    returns 0 results. Dropping keywords prevents over-restrictive ANDs from
+    specific numeric values or rare phrases that the LLM may have generated.
+    """
+    cleaned = _clean_free_text_query(query)
+    parts: list[str] = []
+
+    if target is not None:
+        anchor = (target.active_ingredient or target.product_name or "").strip()
+        if not anchor and target.device_category:
+            anchor = target.device_category.replace("_", " ").strip()
+        if anchor:
+            parts.append(_title_abstract_term(anchor))
+
+        ind_terms: list[str] = []
+        for raw in target.indications:
+            s = raw.strip().replace("_", " ").replace("-", " ")
+            if not s:
+                continue
+            ind_terms.append(_title_abstract_term(s))
+
+        ind_terms = _dedupe_preserve(ind_terms)
+        if ind_terms:
+            if len(ind_terms) == 1:
+                parts.append(ind_terms[0])
+            else:
+                parts.append("(" + " OR ".join(ind_terms) + ")")
+
+    if parts:
+        return " AND ".join(parts)
+
+    return cleaned or query.strip() or ""
 
 
 def _entrez_params() -> dict[str, str]:
@@ -334,9 +401,38 @@ async def search_pubmed(
     min_year: int | None = None,
     max_year: int | None = None,
     country: str | None = None,
+    *,
+    target: TargetProductProfile | None = None,
+    free_text_fallback: str | None = None,
 ) -> list[Paper]:
-    """Full PubMed search pipeline: esearch for PMIDs, then efetch for records."""
+    """Full PubMed search pipeline: esearch for PMIDs, then efetch for records.
+
+    If the primary query returns 0 results, two fallback levels are attempted:
+
+    1. Simplified query (anchor + indications only, keywords dropped). This
+       catches cases where the LLM generated overly specific keywords (e.g.
+       numeric values like "20 mmHg") that produce an impossible AND chain.
+    2. Raw free-text fallback string (e.g. the user's original query), which
+       is always broad enough to return something.
+    """
     pmids = await search_pmids(query, max_results, min_year=min_year, max_year=max_year, country=country)
+
+    if not pmids and target is not None:
+        simplified = build_pubmed_query_simplified(free_text_fallback or query, target)
+        if simplified and simplified != query:
+            logger.warning(
+                "PubMed primary query returned 0 — retrying with simplified query: {!r}",
+                simplified[:200],
+            )
+            pmids = await search_pmids(simplified, max_results, min_year=min_year, max_year=max_year, country=country)
+
+    if not pmids and free_text_fallback and free_text_fallback != query:
+        logger.warning(
+            "PubMed simplified query also returned 0 — falling back to free-text: {!r}",
+            free_text_fallback[:200],
+        )
+        pmids = await search_pmids(free_text_fallback, max_results, min_year=min_year, max_year=max_year, country=country)
+
     if not pmids:
         return []
     return await fetch_papers(pmids)

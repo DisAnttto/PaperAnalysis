@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import uuid
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 
 from fastapi import APIRouter
@@ -10,12 +12,15 @@ from loguru import logger
 
 from app.api.models import SearchResponse
 from app.core.config import settings
+from app.models.paper import Paper
+from app.models.run_log import RetrievalRunLog, StageCounts
 from app.models.search import SearchRequest
 from app.normalization import normalize_extraction
 from app.ranking.composite import rank_papers, score_composite
 from app.ranking.product_display import format_product_table_label
 from app.ranking.relevance_agent import llm_relevance_raw, merge_relevance_llm
-from app.models.paper import Paper
+from app.services.intent_router import get_routing
+from app.services.post_filters import apply_post_filters
 
 router = APIRouter(prefix="/api/v1", tags=["search"])
 
@@ -74,10 +79,17 @@ async def search(request: SearchRequest) -> SearchResponse:
     from app.services.triage import triage_papers
     from app.services import db
 
+    run_id = str(uuid.uuid4())
+    started_at = datetime.now(tz=timezone.utc)
+    counts = StageCounts()
     relevance_cache: dict[str, tuple[float, dict]] = {}
 
+    routing = get_routing(request)
     logger.info(
-        "Live search: user_query={!r}, pool_size={}, max_results={}",
+        "Live search [{}]: intent={}, sources={}, query={!r}, pool_size={}, max_results={}",
+        run_id,
+        routing.intent.value,
+        sorted(routing.enabled_sources),
         request.query,
         request.pool_size,
         request.max_results,
@@ -91,12 +103,29 @@ async def search(request: SearchRequest) -> SearchResponse:
         min_year=request.min_year,
         max_year=request.max_year,
         country=request.country,
+        enabled_sources=routing.enabled_sources,
+        budget_overrides=routing.budget_overrides,
     )
     papers = pool_result.papers
+    counts.pool_per_source = pool_result.source_counts
+    counts.pool_total = sum(pool_result.source_counts.values())
+    counts.post_dedup = len(papers)
+
     if not papers:
-        return SearchResponse(results=[], total=0, mode="live", query=request.query)
+        return SearchResponse(
+            results=[], total=0, mode="live", query=request.query,
+            run_id=run_id, stage_counts=counts,
+        )
 
     db.save_papers(papers)
+
+    # Post-retrieval filters (journal, author, include/exclude terms)
+    papers = apply_post_filters(papers, request)
+    if not papers:
+        return SearchResponse(
+            results=[], total=0, mode="live", query=request.query,
+            run_id=run_id, stage_counts=counts,
+        )
 
     shortlisted = await triage_papers(
         papers,
@@ -105,8 +134,13 @@ async def search(request: SearchRequest) -> SearchResponse:
         request.max_results,
     )
     papers = _papers_in_uid_order(papers, shortlisted)
+    counts.post_triage = len(papers)
+
     if not papers:
-        return SearchResponse(results=[], total=0, mode="live", query=request.query)
+        return SearchResponse(
+            results=[], total=0, mode="live", query=request.query,
+            run_id=run_id, stage_counts=counts,
+        )
 
     metrics_hints = request.metrics_of_interest or []
     bypass_extraction_cache = len(metrics_hints) > 0
@@ -139,12 +173,33 @@ async def search(request: SearchRequest) -> SearchResponse:
 
         triples.append((paper, extraction, normalized))
 
+    counts.post_extraction = len(triples)
+
     ranked = await rank_papers(triples, request, relevance_cache=relevance_cache)
+    counts.final_ranked = len(ranked)
+
+    finished_at = datetime.now(tz=timezone.utc)
+    run_log = RetrievalRunLog(
+        run_id=run_id,
+        query=request.query,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_ms=int((finished_at - started_at).total_seconds() * 1000),
+        mode="live",
+        stage_counts=counts,
+    )
+    try:
+        db.save_run_log(run_log)
+    except Exception as exc:
+        logger.warning("Failed to persist run log {}: {}", run_id, exc)
+
     return SearchResponse(
         results=ranked,
         total=len(ranked),
         mode="live",
         query=request.query,
+        run_id=run_id,
+        stage_counts=counts,
     )
 
 
@@ -169,7 +224,17 @@ async def _stream_search(request: SearchRequest) -> AsyncGenerator[str, None]:
     from app.services.triage import triage_papers_stream
     from app.services import db
 
-    yield _sse("status", {"message": "Searching all databases…", "phase": "searching"})
+    run_id = str(uuid.uuid4())
+    started_at = datetime.now(tz=timezone.utc)
+    counts = StageCounts()
+    routing = get_routing(request)
+
+    yield _sse("status", {
+        "message": "Searching all databases…",
+        "phase": "searching",
+        "run_id": run_id,
+        "intent": routing.intent.value,
+    })
 
     try:
         pool_result = await search_all_sources(
@@ -180,21 +245,35 @@ async def _stream_search(request: SearchRequest) -> AsyncGenerator[str, None]:
             min_year=request.min_year,
             max_year=request.max_year,
             country=request.country,
+            enabled_sources=routing.enabled_sources,
+            budget_overrides=routing.budget_overrides,
         )
         papers = pool_result.papers
     except Exception as exc:
         logger.error("Multi-source search failed: {}", exc)
         yield _sse("error", {"message": f"Search error: {exc}", "fatal": True})
-        yield _sse("done", {"total": 0, "results": [], "mode": "live"})
+        yield _sse("done", {"total": 0, "results": [], "mode": "live", "run_id": run_id})
         return
+
+    counts.pool_per_source = pool_result.source_counts
+    counts.pool_total = sum(pool_result.source_counts.values())
+    counts.post_dedup = len(papers)
 
     if not papers:
         yield _sse("status", {"message": "No results found.", "phase": "done"})
-        yield _sse("done", {"total": 0, "results": [], "mode": "live"})
+        yield _sse("done", {"total": 0, "results": [], "mode": "live", "run_id": run_id})
+        return
+
+    db.save_papers(papers)
+
+    # Post-retrieval filters
+    papers = apply_post_filters(papers, request)
+    if not papers:
+        yield _sse("status", {"message": "No results after filtering.", "phase": "done"})
+        yield _sse("done", {"total": 0, "results": [], "mode": "live", "run_id": run_id})
         return
 
     pool_total = len(papers)
-    db.save_papers(papers)
 
     _POOL_BATCH = 25
     pool_papers = [
@@ -238,15 +317,16 @@ async def _stream_search(request: SearchRequest) -> AsyncGenerator[str, None]:
                 },
             )
         papers = _papers_in_uid_order(papers, shortlisted)
+        counts.post_triage = len(papers)
     except Exception as exc:
         logger.error("Triage failed: {}", exc)
         yield _sse("error", {"message": f"Triage error: {exc}", "fatal": True})
-        yield _sse("done", {"total": 0, "results": [], "mode": "live"})
+        yield _sse("done", {"total": 0, "results": [], "mode": "live", "run_id": run_id})
         return
 
     if not papers:
         yield _sse("status", {"message": "No papers after triage.", "phase": "done"})
-        yield _sse("done", {"total": 0, "results": [], "mode": "live"})
+        yield _sse("done", {"total": 0, "results": [], "mode": "live", "run_id": run_id})
         return
 
     total = len(papers)
@@ -340,11 +420,31 @@ async def _stream_search(request: SearchRequest) -> AsyncGenerator[str, None]:
             logger.error("Extraction failed for {}: {}", uid, exc)
             yield _sse("error", {"pmid": uid, "message": str(exc)})
 
+    counts.post_extraction = len(triples)
     final_results = await rank_papers(triples, request, relevance_cache=relevance_cache)
+    counts.final_ranked = len(final_results)
+
+    finished_at = datetime.now(tz=timezone.utc)
+    run_log = RetrievalRunLog(
+        run_id=run_id,
+        query=request.query,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_ms=int((finished_at - started_at).total_seconds() * 1000),
+        mode="live",
+        stage_counts=counts,
+    )
+    try:
+        db.save_run_log(run_log)
+    except Exception as exc:
+        logger.warning("Failed to persist run log {}: {}", run_id, exc)
+
     yield _sse("done", {
         "total": len(final_results),
         "results": [r.model_dump(mode="json") for r in final_results],
         "mode": "live",
+        "run_id": run_id,
+        "stage_counts": counts.model_dump(),
     })
 
 
